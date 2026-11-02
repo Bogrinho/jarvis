@@ -18,6 +18,7 @@ let nextServerReqId = 1000;
 const waiting = new Map(); // server request id -> resolve
 let turnN = 0;
 let threadN = 0;
+let steerWaiter = null; // resolve(text) for the "wait-steer" scenario
 
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
 const notify = (method, params) => send({ jsonrpc: '2.0', method, params });
@@ -76,6 +77,15 @@ async function runTurn(threadId, turnId, text) {
   if (text === 'crash') {
     notify('item/agentMessage/delta', { ...base, itemId: 'm-crash', delta: 'partial' });
     setTimeout(() => process.exit(3), 20);
+    return;
+  }
+  if (text === 'wait-steer') {
+    notify('item/started', { ...base, item: { type: 'agentMessage', id: 'm-steer', text: '', phase: null, memoryCitation: null, delivery: null, questions: null }, startedAtMs: 1 });
+    notify('item/agentMessage/delta', { ...base, itemId: 'm-steer', delta: 'waiting…' });
+    const steered = await new Promise(r => { steerWaiter = r; });
+    notify('item/agentMessage/delta', { ...base, itemId: 'm-steer', delta: 'steered=' + steered });
+    notify('item/completed', { ...base, item: { type: 'agentMessage', id: 'm-steer', text: 'waiting…steered=' + steered, phase: null, memoryCitation: null, delivery: null, questions: null }, completedAtMs: 2 });
+    notify('turn/completed', { threadId, turn: turn('completed') });
     return;
   }
   if (text === 'malformed') process.stdout.write('this is {not json\n');
@@ -157,6 +167,15 @@ rl.on('line', (line) => {
       const turnId = 'turn-' + (++turnN);
       reply({ turn: { id: turnId, rootTurnId: null, items: [], itemsView: 'notLoaded', status: 'inProgress', error: null, startedAt: 1, completedAt: null, durationMs: null } });
       runTurn(p.threadId, turnId, p.input?.[0]?.text ?? '');
+      return;
+    }
+    case 'turn/steer': {
+      if (!steerWaiter || p.expectedTurnId !== 'turn-' + turnN) {
+        return send({ jsonrpc: '2.0', id: msg.id, error: { code: -32600, message: 'no active turn' } });
+      }
+      reply({ turnId: p.expectedTurnId });
+      const w = steerWaiter; steerWaiter = null;
+      w(p.input?.[0]?.text ?? '');
       return;
     }
     case 'turn/interrupt':

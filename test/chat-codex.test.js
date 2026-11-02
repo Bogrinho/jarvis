@@ -221,7 +221,7 @@ test('listCodexThreads filters by cwd', async (t) => {
   assert.equal(req.params.limit, 10);
 });
 
-test('server crash mid-turn emits error and exit, next send restarts server', async (t) => {
+test('server crash mid-turn emits error item and state error (no exit), next send restarts server', async (t) => {
   const { server } = mkServer();
   t.after(() => server.close());
   const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\\proj' });
@@ -229,18 +229,67 @@ test('server crash mid-turn emits error and exit, next send restarts server', as
   await a.start({ conv: { id: 'c' } });
   const pid1 = (await server.request('fake/log', {})).pid;
   a.send('crash');
-  const ex = await waitFor(() => ev.find(e => e[0] === 'exit'));
-  assert.equal(ex[1], 3);
-  assert.ok(!states(ev).includes('idle'), 'no idle on crash; manager turns exit into error');
+  await waitFor(() => states(ev).includes('error'));
+  const err = ev.filter(e => e[0] === 'item' && e[1].kind === 'error').map(e => e[1]);
+  assert.equal(err.length, 1);
+  assert.match(err[0].text, /Codex/);
+  assert.ok(!states(ev).includes('idle'));
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(ev.filter(e => e[0] === 'exit').length, 0, 'exit only comes from close()');
 
   ev.length = 0;
   a.send('hello again');
   await waitFor(() => states(ev).includes('idle'));
+  assert.deepEqual(states(ev), ['working', 'idle']);
+  assert.equal(ev.filter(e => e[0] === 'delta').map(e => e[2]).join(''), 'Hello there');
   const log = await server.request('fake/log', {});
   assert.notEqual(log.pid, pid1);
   assert.deepEqual(log.received.map(m => m.method).filter(m => m !== 'fake/log'),
     ['initialize', 'initialized', 'thread/resume', 'turn/start']);
   assert.equal(log.received.find(m => m.method === 'thread/resume').params.threadId, 'thread-1');
+  assert.equal(log.received.find(m => m.method === 'turn/start').params.threadId, 'thread-1');
+
+  const closed = [];
+  a.on('exit', c => closed.push(c));
+  a.close();
+  assert.equal(closed.length, 1);
+});
+
+test('server death while idle is silent; next send resumes', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\\proj' });
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' } });
+  const exited = once(server.child, 'exit');
+  server.child.kill();
+  await exited;
+  await new Promise(r => setTimeout(r, 30));
+  assert.deepEqual(ev, []);
+  a.send('hello');
+  await waitFor(() => states(ev).includes('idle'));
+  assert.equal((await sentRequests(server, 'thread/resume')).length, 1);
+});
+
+test('send while a turn is running uses turn/steer with the active turn id', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\\proj' });
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' } });
+  a.send('wait-steer');
+  await waitFor(() => ev.find(e => e[0] === 'item' && e[1].kind === 'assistant'));
+  a.send('more please');
+  await waitFor(() => states(ev).includes('idle'));
+  const steers = await sentRequests(server, 'turn/steer');
+  assert.equal(steers.length, 1);
+  assert.deepEqual(steers[0].params, {
+    threadId: 'thread-1', expectedTurnId: 'turn-1',
+    input: [{ type: 'text', text: 'more please', text_elements: [] }],
+  });
+  assert.equal((await sentRequests(server, 'turn/start')).length, 1);
+  assert.equal(ev.filter(e => e[0] === 'delta').map(e => e[2]).join(''), 'waiting…steered=more please');
+  assert.deepEqual(states(ev), ['working', 'idle']);
 });
 
 test('unknown method rejects; server death rejects pending requests', async (t) => {

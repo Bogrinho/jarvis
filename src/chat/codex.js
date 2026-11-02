@@ -399,6 +399,7 @@ class CodexAdapter extends EventEmitter {
     if (turnId && this.#threadId) {
       this.#server.request('turn/interrupt', { threadId: this.#threadId, turnId }).catch(() => {});
     }
+    this.emit('exit', 0); // the only place 'exit' is emitted
   }
 
   #setState(s) {
@@ -419,8 +420,12 @@ class CodexAdapter extends EventEmitter {
     const busy = this.#state === 'working' || this.#state === 'waiting' || this.#activeTurn;
     this.#activeTurn = null;
     if (this.#threadId) this.#needsResume = true;
-    this.#state = 'idle';
-    if (busy) this.emit('exit', code);
+    // The conversation survives: the next send restarts the server and resumes the thread.
+    if (busy) {
+      this.emit('item', { id: randomUUID(), kind: 'error',
+        text: `Η σύνδεση με το Codex έπεσε (κωδικός ${code ?? 'άγνωστος'}) — ξαναπροσπάθησε.` });
+      this.#setState('error');
+    }
   }
 
   #onRequest(method, params, requestId) {
