@@ -476,3 +476,21 @@ test('sessions whose recorded cwd differs are not listed even when the project s
   // case, slash style and unicode normalization do not matter
   assert.deepEqual((await listClaudeSessions({ claudeHome: home, cwd: 'c:/proj/ένα'.normalize('NFD') })).map(s => s.externalId), [sa]);
 });
+
+test('a session that started elsewhere and later moved into the folder is listed', async (t) => {
+  const home = await mkHome(t);
+  const cwd = 'C:\Proj\Ένα';
+  const dir = join(home, 'projects', claudeProjectSlug(cwd));
+  await mkdir(dir, { recursive: true });
+  const sid = 'dddddddd-0000-4000-8000-000000000001';
+  const scratch = 'C:\Temp\scratch-1';
+  let body = userLine('build me jarvis', { cwd: scratch });
+  for (let i = 0; i < 300; i++) body += asstLine([{ type: 'text', text: `step ${i}` }]).replace('}\n', `,"cwd":${JSON.stringify(scratch)}}\n`);
+  body += userLine('now in the project', { cwd });
+  await writeFile(join(dir, `${sid}.jsonl`), body);
+  const list = await listClaudeSessions({ claudeHome: home, cwd });
+  assert.deepEqual(list.map(s => s.externalId), [sid]);
+  assert.equal(list[0].title, 'build me jarvis');
+  // never in the folder: still hidden
+  assert.deepEqual(await listClaudeSessions({ claudeHome: home, cwd: 'C:\Proj\Δύο' }), []);
+});

@@ -469,24 +469,24 @@ async function projectDir(claudeHome, cwd) {
 
 const normCwd = (p) => String(p ?? '').normalize('NFC').replace(/^\\\\\?\\/, '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 
-// The cwd Claude recorded inside a session file. The project folder name is a lossy
-// slug (non-ASCII folders collide), so this is what proves a session belongs to a folder.
-async function recordedCwd(file) {
+// Whether Claude recorded this folder as the cwd anywhere in a session file. The project
+// folder name is a lossy slug (non-ASCII folders collide), so this proves a session belongs
+// to a folder. A session can start in another folder and move here later, so every line counts.
+async function workedIn(file, want) {
   const stream = createReadStream(file, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  let n = 0;
   try {
     for await (const line of rl) {
-      if (++n > 200) break;
+      if (!line.includes('"cwd"')) continue;
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
-      if (typeof msg?.cwd === 'string' && msg.cwd) return msg.cwd;
+      if (typeof msg?.cwd === 'string' && normCwd(msg.cwd) === want) return true;
     }
   } catch { /* unreadable */ } finally {
     rl.close();
     stream.destroy();
   }
-  return null;
+  return false;
 }
 
 async function firstUserText(file) {
@@ -524,8 +524,7 @@ export async function listClaudeSessions({ claudeHome, cwd, limit = 30 }) {
   const out = [];
   for (const f of files) {
     if (out.length >= limit) break;
-    const rec = await recordedCwd(f.file);
-    if (rec === null || normCwd(rec) !== normCwd(cleanCwd(cwd))) continue;
+    if (!(await workedIn(f.file, normCwd(cleanCwd(cwd))))) continue;
     const text = (await firstUserText(f.file)).replace(/\s+/g, ' ').trim();
     if (!text) continue; // nothing the user said: not a conversation worth continuing
     out.push({ externalId: f.id, title: [...text].slice(0, 60).join(''), updatedAt: f.mtime.toISOString() });
