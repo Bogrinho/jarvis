@@ -57,7 +57,7 @@ export class ChatManager extends EventEmitter {
     const adapter = factory(account, cwd);
     const t = now();
     const info = {
-      id: randomUUID().slice(0, 8), accountId, cwd, side, title,
+      id: randomUUID(), accountId, cwd, side, title,
       state: 'idle', externalId: null, createdAt: t, updatedAt: t,
     };
     const conv = { info, items: [], adapter, approvals: new Map(), exited: false };
@@ -95,7 +95,9 @@ export class ChatManager extends EventEmitter {
   }
 
   interrupt(id) {
-    this.#need(id).adapter.interrupt();
+    const c = this.#need(id);
+    this.#expireApprovals(c);
+    c.adapter.interrupt();
   }
 
   answer(id, approvalId, decision) {
@@ -162,9 +164,13 @@ export class ChatManager extends EventEmitter {
 
   #addItem(c, item) {
     c.items.push(item);
-    if (c.items.length > this.#cap) {
-      const dropped = c.items.splice(0, c.items.length - this.#cap);
-      for (const d of dropped) if (d.approvalId) c.approvals.delete(d.approvalId);
+    // Trim oldest first, but never a pending approval: its record is the only
+    // way to answer the adapter's outstanding request.
+    for (let i = 0; c.items.length > this.#cap && i < c.items.length;) {
+      const it = c.items[i];
+      if (it.kind === 'approval' && it.state === 'pending') { i++; continue; }
+      c.items.splice(i, 1);
+      if (it.approvalId) c.approvals.delete(it.approvalId);
     }
     this.#touch(c);
     this.#scheduleWrite();
@@ -172,6 +178,7 @@ export class ChatManager extends EventEmitter {
   }
 
   #setState(c, state) {
+    if (state === 'idle' || state === 'error') this.#expireApprovals(c);
     if (c.info.state === state) return;
     c.info.state = state;
     this.#touch(c);

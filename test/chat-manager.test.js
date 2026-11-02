@@ -204,3 +204,48 @@ test('concurrent creates serialize index writes', async () => {
   await mgr.flush();
   assert.equal(JSON.parse(await readFile(indexFile, 'utf8')).length, 10);
 });
+
+test('transcript cap never drops a pending approval', async () => {
+  const { mgr, adapters, mk } = await setup({ transcriptCap: 5 });
+  const info = await mk();
+  adapters[0].emit('approval', { token: 'tk', title: 'x', detail: '' });
+  for (let i = 0; i < 20; i++) adapters[0].emit('item', { id: 'n' + i, kind: 'notice', text: String(i) });
+  const items = mgr.get(info.id).items;
+  const ap = items.find(x => x.kind === 'approval');
+  assert.ok(ap, 'approval kept');
+  assert.equal(items.filter(x => x.kind === 'notice').length, 4);
+  mgr.answer(info.id, ap.approvalId, 'approve');
+  assert.deepEqual(adapters[0].answers, [['tk', 'approve']]);
+});
+
+for (const st of ['idle', 'error']) {
+  test(`pending approval expires when adapter state becomes ${st}`, async () => {
+    const { mgr, adapters, mk } = await setup();
+    const info = await mk();
+    adapters[0].emit('approval', { token: 't', title: 'x', detail: '' });
+    const ap = mgr.get(info.id).items[0];
+    const updates = [];
+    mgr.on('update', (...a) => updates.push(a));
+    adapters[0].emit('state', st);
+    assert.equal(mgr.get(info.id).items[0].state, 'expired');
+    assert.deepEqual(updates, [[info.id, ap.id, { state: 'expired' }]]);
+    assert.throws(() => mgr.answer(info.id, ap.approvalId, 'approve'), e => e.code === 'NO_SUCH_APPROVAL');
+    assert.equal(adapters[0].answers.length, 0);
+  });
+}
+
+test('pending approval expires on interrupt', async () => {
+  const { mgr, adapters, mk } = await setup();
+  const info = await mk();
+  adapters[0].emit('approval', { token: 't', title: 'x', detail: '' });
+  const ap = mgr.get(info.id).items[0];
+  mgr.interrupt(info.id);
+  assert.equal(adapters[0].interrupted, 1);
+  assert.equal(mgr.get(info.id).items[0].state, 'expired');
+  assert.throws(() => mgr.answer(info.id, ap.approvalId, 'approve'), e => e.code === 'NO_SUCH_APPROVAL');
+});
+
+test('conversation ids are full UUIDs', async () => {
+  const { mk } = await setup();
+  assert.match((await mk()).id, /^[0-9a-f-]{36}$/);
+});
