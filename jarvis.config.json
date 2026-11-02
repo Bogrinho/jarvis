@@ -30,6 +30,7 @@
     }
   },
   "projects": [
+    { "name": "SiteWatch", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\sitewatch-portfolio", "side": "personal" },
     { "name": "Δουλειά (παλιός φάκελος Codex)", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-05-17\\act-as-my-coding-agent-we", "side": "work" }
   ],
   "quickCommands": [
