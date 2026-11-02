@@ -15,7 +15,7 @@ test('loads default config (work Codex removed)', () => {
   assert.equal(c.accounts.work, undefined);
   assert.equal(c.accounts.mine.env.CODEX_HOME, 'C:\\Users\\stath\\.codex-personal');
   assert.equal(c.accounts.claude.mode, 'edit-in-project');
-  assert.equal(c.accounts.gemini.enabled, false);
+  assert.equal(c.accounts.gemini.enabled, true);
   assert.equal(c.port, 4777);
 });
 

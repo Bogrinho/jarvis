@@ -24,9 +24,9 @@
       "cli": "gemini",
       "side": "personal",
       "mode": "edit-in-project",
-      "home": "vault",
+      "home": ".",
       "env": {},
-      "enabled": false
+      "enabled": true
     }
   },
   "projects": [],
