@@ -110,3 +110,41 @@ test('gemini launch uses auto_edit; env is merged over process.env', () => {
   assert.ok(l.args.includes('auto_edit'));
   assert.equal(l.env.PATH ?? l.env.Path, process.env.PATH ?? process.env.Path);
 });
+
+const STRIPPED = [
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY',
+  'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+];
+
+function withEnv(vars, fn) {
+  const saved = {};
+  for (const k of Object.keys(vars)) { saved[k] = process.env[k]; process.env[k] = vars[k]; }
+  try { return fn(); } finally {
+    for (const k of Object.keys(vars)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+}
+
+test('inherited CODEX_HOME in another case is replaced, not duplicated', () => {
+  const { cfg } = makeConfig();
+  const l = withEnv({ Codex_Home: 'C:/leaked/work' }, () => buildLaunch(cfg.accounts.mine));
+  const keys = Object.keys(l.env).filter((k) => k.toLowerCase() === 'codex_home');
+  assert.deepEqual(keys, ['CODEX_HOME']);
+  assert.equal(l.env.CODEX_HOME, cfg.accounts.mine.env.CODEX_HOME);
+});
+
+test('API keys from the parent environment are not inherited', () => {
+  const { cfg } = makeConfig();
+  const vars = Object.fromEntries(STRIPPED.map((k, i) => [i % 2 ? k.toLowerCase() : k, 'secret']));
+  for (const id of ['work', 'mine', 'claude', 'gemini']) {
+    const l = withEnv(vars, () => buildLaunch(cfg.accounts[id]));
+    for (const k of STRIPPED) {
+      assert.ok(!Object.keys(l.env).some((e) => e.toLowerCase() === k.toLowerCase()), `${id}: ${k} leaked`);
+    }
+  }
+});
+
+test('codex launch without CODEX_HOME is refused', () => {
+  const { cfg } = makeConfig();
+  const acct = { ...cfg.accounts.mine, env: {} };
+  assert.throws(() => buildLaunch(acct), (e) => e instanceof PolicyError);
+});

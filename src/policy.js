@@ -56,10 +56,27 @@ export function resolveTarget(config, { accountId, projectPath, useHome } = {}) 
   return { cwd: project.path, side: project.side };
 }
 
+// Credentials that would make a CLI bypass the account's own login folder.
+const STRIPPED_ENV = [
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY',
+  'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+].map((k) => k.toLowerCase());
+
+// Windows env names are case-insensitive: drop any inherited spelling of a key we set or strip.
+function buildEnv(accountEnv) {
+  const drop = new Set([...STRIPPED_ENV, ...Object.keys(accountEnv).map((k) => k.toLowerCase())]);
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!drop.has(k.toLowerCase())) env[k] = v;
+  return Object.assign(env, accountEnv);
+}
+
 export function buildLaunch(account) {
   const modeArgs = MODE_ARGS[account.cli]?.[account.mode];
   if (!modeArgs) throw new PolicyError('UNKNOWN_ACCOUNT', `no launch mapping for ${account.cli}/${account.mode}`);
-  const env = { ...process.env, ...account.env };
+  if (account.cli === 'codex' && !account.env?.CODEX_HOME) {
+    throw new PolicyError('NO_CODEX_HOME', `account ${account.id} has no CODEX_HOME`);
+  }
+  const env = buildEnv(account.env ?? {});
   if (process.platform === 'win32') {
     // npm installs .cmd shims on Windows, which must go through cmd.exe.
     return { file: process.env.ComSpec || 'cmd.exe', args: ['/d', '/c', account.cli, ...modeArgs], env };
