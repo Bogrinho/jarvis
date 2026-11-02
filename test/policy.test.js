@@ -161,3 +161,11 @@ test('antigravity (agy) launch: accept-edits mode, cautious asks for everything'
   const c = buildLaunch({ ...acc, mode: 'cautious' });
   assert.equal(c.args.at(-1), 'agy');
 });
+
+test('claude launched by Jarvis gets the status-line settings file (for live usage)', () => {
+  const { cfg } = makeConfig();
+  const l = buildLaunch(cfg.accounts.claude, { claudeSettingsFile: 'C:/J/data/claude-jarvis-settings.json' });
+  assert.deepEqual(l.args.slice(-2), ['--settings', 'C:/J/data/claude-jarvis-settings.json']);
+  assert.ok(!buildLaunch(cfg.accounts.claude).args.includes('--settings'));
+  assert.ok(!buildLaunch(cfg.accounts.mine, { claudeSettingsFile: 'x.json' }).args.includes('--settings'));
+});

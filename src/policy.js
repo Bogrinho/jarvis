@@ -76,8 +76,11 @@ export function buildEnv(accountEnv) {
   return Object.assign(env, accountEnv);
 }
 
-export function buildLaunch(account) {
-  const modeArgs = MODE_ARGS[account.cli]?.[account.mode];
+// claudeSettingsFile: extra Claude Code settings (Jarvis's status line, which reports the
+// account's 5h / weekly limits to the usage panel). Only used for Claude.
+export function buildLaunch(account, { claudeSettingsFile } = {}) {
+  const base = MODE_ARGS[account.cli]?.[account.mode];
+  const modeArgs = base && account.cli === 'claude' && claudeSettingsFile ? [...base, '--settings', claudeSettingsFile] : base;
   if (!modeArgs) throw new PolicyError('UNKNOWN_ACCOUNT', `no launch mapping for ${account.cli}/${account.mode}`);
   if (account.cli === 'codex' && !account.env?.CODEX_HOME) {
     throw new PolicyError('NO_CODEX_HOME', `account ${account.id} has no CODEX_HOME`);

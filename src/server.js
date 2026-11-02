@@ -181,6 +181,7 @@ export function createServer({
     historyFile: deps.historyFile ?? path.join(config.rootDir, 'data', 'usage-history.json'),
     watch: deps.watch ?? fs.watch,
     log: deps.log ?? (() => {}),
+    claudeSettingsFile: deps.claudeSettingsFile ?? null,
   };
   const port = config.port;
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -297,7 +298,7 @@ export function createServer({
       target = resolveTarget(config, { accountId, projectPath: projectPath || undefined, useHome: useHome === true });
     }
     const account = config.accounts[accountId];
-    const launch = buildLaunch(account);
+    const launch = buildLaunch(account, { claudeSettingsFile: d.claudeSettingsFile });
     if (!title) {
       const project = config.projects.find((p) => path.resolve(p.path).toLowerCase() === path.resolve(target.cwd).toLowerCase());
       title = jobPrompt ? jobPrompt.slice(0, 60) : `${account.label} · ${project ? project.name : 'home'}`;
