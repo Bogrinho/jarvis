@@ -87,3 +87,33 @@ test('killAll ends every job', async () => {
   await jm.killAll();
   assert.equal(jm.list().length, 0);
 });
+
+function fakeProc() {
+  const h = { writes: [] };
+  return {
+    onData: (f) => { h.d = f; }, onExit: (f) => { h.e = f; },
+    write(s) { h.writes.push(s); }, resize() {}, kill() { h.e?.({ exitCode: 0 }); }, _h: h,
+  };
+}
+
+test('prompt text and Enter are sent as two writes, in order', async () => {
+  let p;
+  jm = new JobManager({ idleMs: 1000, promptDelayMs: 20, spawn: () => (p = fakeProc()) });
+  jm.start({ accountId: 'a', cwd: '.', launch: launch(), title: 't', prompt: 'hello' });
+  p._h.d('ready> ');
+  await until(() => p._h.writes.length >= 1, 2000);
+  assert.deepEqual(p._h.writes, ['hello']);
+  await until(() => p._h.writes.length >= 2, 2000);
+  assert.deepEqual(p._h.writes, ['hello', '\r']);
+});
+
+test('Enter is not sent if the job exits after the prompt text', async () => {
+  let p;
+  jm = new JobManager({ idleMs: 1000, promptDelayMs: 20, spawn: () => (p = fakeProc()) });
+  jm.start({ accountId: 'a', cwd: '.', launch: launch(), title: 't', prompt: 'hello' });
+  p._h.d('ready> ');
+  await until(() => p._h.writes.length >= 1, 2000);
+  p._h.e({ exitCode: 0 });
+  await new Promise((r) => setTimeout(r, 250));
+  assert.deepEqual(p._h.writes, ['hello']);
+});

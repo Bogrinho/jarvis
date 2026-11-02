@@ -5,12 +5,13 @@ import * as pty from '@lydell/node-pty';
 const KILL_TIMEOUT_MS = 3000;
 
 export class JobManager extends EventEmitter {
-  constructor({ spawn = pty.spawn, scrollbackBytes = 512 * 1024, idleMs = 3000, promptDelayMs = 1500 } = {}) {
+  constructor({ spawn = pty.spawn, scrollbackBytes = 512 * 1024, idleMs = 3000, promptDelayMs = 1500, submitDelayMs = 100 } = {}) {
     super();
     this.spawn = spawn;
     this.scrollbackBytes = scrollbackBytes;
     this.idleMs = idleMs;
     this.promptDelayMs = promptDelayMs;
+    this.submitDelayMs = submitDelayMs;
     this.jobs = new Map();
   }
 
@@ -42,7 +43,12 @@ export class JobManager extends EventEmitter {
         job.promptTimer = setTimeout(() => {
           const text = job.promptPending;
           job.promptPending = null;
-          if (!job.exited) proc.write(text + '\r');
+          if (job.exited) return;
+          proc.write(text);
+          // Enter as a separate keystroke: some TUIs treat a single "text\r" chunk as a paste and don't submit.
+          job.promptTimer = setTimeout(() => {
+            if (!job.exited) proc.write('\r');
+          }, this.submitDelayMs);
         }, this.promptDelayMs);
       }
       this.emit('data', id, chunk);

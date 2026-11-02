@@ -348,7 +348,8 @@ test('starts a job and streams data over ws', async () => {
   ws.send(JSON.stringify({ type: 'resize', id: r.json.id, cols: 100, rows: 40 }));
   await until(() => proc.writes.includes('typed') && proc.resizes.length === 1);
   assert.deepEqual(proc.resizes[0], [100, 40]);
-  await until(() => proc.writes.includes('hello\r'));
+  // prompt text first, then Enter as its own write (user input may land in between)
+  await until(() => proc.writes.includes('hello') && proc.writes.indexOf('\r', proc.writes.indexOf('hello')) > 0);
   // garbage and unknown ids are ignored
   ws.send('not json');
   ws.send(JSON.stringify({ type: 'input', id: 'nope', data: 'x' }));
@@ -370,7 +371,7 @@ test('quick command runs in account home', async () => {
   assert.equal(proc.opts.cwd, ctx.config.accounts.claude.home);
   proc.emit('ready');
   const prompt = ctx.config.quickCommands.find((q) => q.id === 'plan-today').prompt;
-  await until(() => proc.writes.includes(prompt + '\r'));
+  await until(() => proc.writes.join('|').includes(prompt + '|\r'));
 
   const work = await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'work', quickCommandId: 'plan-today' } });
   assert.equal(work.status, 403);
