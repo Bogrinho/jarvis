@@ -1,0 +1,7 @@
+{
+  "port": 4777,
+  "accounts": {},
+  "projects": [{ "name": "x", "path": "C:\\tmp\\x", "side": "other" }],
+  "quickCommands": [],
+  "directivesFile": "vault/today.md"
+}

@@ -1,0 +1,3 @@
+- [ ] Review priorities for today
+- [ ] Pick one project to move forward
+- [ ] Wrap up and note tomorrow

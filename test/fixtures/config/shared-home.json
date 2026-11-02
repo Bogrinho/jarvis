@@ -1,0 +1,10 @@
+{
+  "port": 4777,
+  "accounts": {
+    "work": { "label": "Work", "cli": "codex", "side": "work", "mode": "cautious", "home": "shared", "env": {}, "enabled": true },
+    "mine": { "label": "Mine", "cli": "codex", "side": "personal", "mode": "edit-in-project", "home": "shared", "env": {}, "enabled": true }
+  },
+  "projects": [],
+  "quickCommands": [],
+  "directivesFile": "vault/today.md"
+}

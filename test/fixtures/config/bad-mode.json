@@ -1,0 +1,9 @@
+{
+  "port": 4777,
+  "accounts": {
+    "work": { "label": "Work", "cli": "codex", "side": "work", "mode": "yolo", "home": null, "env": {}, "enabled": true }
+  },
+  "projects": [],
+  "quickCommands": [],
+  "directivesFile": "vault/today.md"
+}
