@@ -1,8 +1,9 @@
+import os from 'node:os';
 import path from 'node:path';
 import { readCodexUsage as defaultCodex } from './codex.js';
 import { readClaudeUsage as defaultClaude } from './claude.js';
 
-const CLAUDE_HOME = 'C:\Users\stath\.claude';
+const CLAUDE_HOME = path.join(os.homedir(), '.claude');
 
 const none = (reason) => ({ kind: 'none', reason });
 
