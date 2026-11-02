@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis — chat mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jura:wght@300;400;600&family=JetBrains+Mono:wght@400;500&family=Commissioner:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f0d10;--ink:#ece7ee;--muted:#8c8592;--faint:#5d5763;--line:#2a2530;--c:#5fd39a;--c-rgb:95,211,154}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.6 Commissioner,system-ui,sans-serif;min-height:100vh;
+  background:radial-gradient(70% 60% at 50% 0%,rgba(var(--c-rgb),.10),transparent 70%),
+  linear-gradient(rgba(var(--c-rgb),.04) 1px,transparent 1px) 0 0/100% 32px,var(--bg)}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 20px 40px}
+.note{font:11px "JetBrains Mono",monospace;color:var(--muted);margin-bottom:14px;letter-spacing:.04em}
+
+/* the chat panel */
+.chat{position:relative;border-radius:22px;overflow:hidden;
+  border:1px solid rgba(var(--c-rgb),.35);
+  background:radial-gradient(120% 70% at 0% 0%,rgba(var(--c-rgb),.12),transparent 55%),
+             radial-gradient(90% 60% at 100% 100%,rgba(var(--c-rgb),.07),transparent 60%),rgba(16,14,19,.82);
+  box-shadow:0 0 0 1px rgba(var(--c-rgb),.12),0 0 60px -18px rgba(var(--c-rgb),.45),0 30px 60px -30px #000;
+  display:grid;grid-template-rows:auto 1fr auto;height:min(78vh,760px)}
+.chat::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.035) 50%,transparent 60%)}
+
+/* header */
+.hd{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(var(--c-rgb),.18);
+  background:linear-gradient(rgba(var(--c-rgb),.08),transparent)}
+.orb{width:34px;height:34px;border-radius:50%;flex:none;position:relative;
+  background:radial-gradient(circle at 40% 35%,#fff 0,rgba(var(--c-rgb),1) 18%,rgba(var(--c-rgb),.25) 55%,transparent 70%);
+  box-shadow:0 0 18px rgba(var(--c-rgb),.6)}
+.orb::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1px solid rgba(var(--c-rgb),.35);animation:spin 6s linear infinite;border-top-color:transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hd h2{font:600 17px/1.1 Jura,sans-serif;letter-spacing:.08em}
+.hd small{display:block;font:11px "JetBrains Mono",monospace;color:var(--muted);margin-top:3px}
+.hd .sp{flex:1}
+.seg{display:flex;padding:3px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.seg button{all:unset;cursor:pointer;font:11px "JetBrains Mono",monospace;padding:5px 12px;border-radius:999px;color:var(--muted)}
+.seg button.on{background:rgba(var(--c-rgb),.18);color:var(--c)}
+.pill{font:10px "JetBrains Mono",monospace;letter-spacing:.08em;padding:5px 10px;border-radius:999px;color:var(--c);border:1px solid rgba(var(--c-rgb),.4);background:rgba(var(--c-rgb),.08)}
+
+/* messages */
+.log{overflow:auto;padding:26px 28px 10px;display:flex;flex-direction:column;gap:18px;scrollbar-width:thin;scrollbar-color:rgba(var(--c-rgb),.3) transparent}
+.day{align-self:center;font:10px "JetBrains Mono",monospace;color:var(--faint);letter-spacing:.14em}
+.me{align-self:flex-end;max-width:72%;padding:12px 16px;border-radius:18px 18px 4px 18px;
+  background:linear-gradient(135deg,rgba(var(--c-rgb),.28),rgba(var(--c-rgb),.12));border:1px solid rgba(var(--c-rgb),.35);
+  box-shadow:0 8px 24px -14px rgba(var(--c-rgb),.6)}
+.ai{display:flex;gap:12px;max-width:82%}
+.ai .av{width:26px;height:26px;border-radius:50%;flex:none;margin-top:2px;
+  background:radial-gradient(circle at 40% 35%,#fff 0,rgba(var(--c-rgb),.9) 22%,rgba(var(--c-rgb),.15) 65%,transparent 72%)}
+.ai .body{display:flex;flex-direction:column;gap:10px;min-width:0}
+.ai p{color:#ddd7e0}
+.ai p b{color:var(--ink);font-weight:600}
+.ai ul{padding-left:18px;color:#ddd7e0}
+.ai code{font:12.5px "JetBrains Mono",monospace;background:rgba(255,255,255,.06);padding:1px 6px;border-radius:5px;color:#bfe9d2}
+
+/* activity: what the AI did */
+.acts{display:flex;flex-direction:column;gap:6px}
+.act{display:flex;align-items:center;gap:10px;font:12px "JetBrains Mono",monospace;color:var(--muted);
+  padding:7px 12px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.02);width:fit-content;max-width:100%}
+.act i{width:16px;height:16px;border-radius:5px;display:grid;place-items:center;font-style:normal;font-size:10px;color:var(--c);background:rgba(var(--c-rgb),.12)}
+.act .ok{color:#5fd39a}
+.act .bad{color:#ff8fa6}
+details.diff{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:rgba(0,0,0,.25)}
+details.diff summary{cursor:pointer;list-style:none;padding:8px 12px;font:12px "JetBrains Mono",monospace;color:var(--muted);display:flex;gap:10px}
+details.diff summary b{color:var(--ink);font-weight:500}
+details.diff summary .add{color:#5fd39a}.rem{color:#ff8fa6}
+details.diff pre{font:12px/1.55 "JetBrains Mono",monospace;padding:10px 14px;border-top:1px solid var(--line);white-space:pre-wrap}
+pre .p{color:#5fd39a}pre .m{color:#ff8fa6}pre .d{color:var(--faint)}
+
+/* approval */
+.ask{border-radius:16px;padding:14px 16px;border:1px solid rgba(242,198,109,.45);
+  background:linear-gradient(135deg,rgba(242,198,109,.12),rgba(242,198,109,.03));display:flex;flex-direction:column;gap:10px}
+.ask .t{font:600 13px Jura,sans-serif;letter-spacing:.06em;color:#f2c66d}
+.ask code{display:block;padding:8px 12px;border-radius:8px;background:rgba(0,0,0,.35);color:#f7e2b0}
+.ask .btns{display:flex;gap:8px}
+.btn{all:unset;cursor:pointer;font:500 12px Commissioner,sans-serif;padding:8px 16px;border-radius:999px;border:1px solid var(--line);color:var(--ink)}
+.btn.go{background:#f2c66d;color:#1b1610;border-color:#f2c66d;font-weight:600}
+.btn:hover{filter:brightness(1.1)}
+
+/* typing */
+.typing{display:flex;gap:12px;align-items:center;color:var(--muted);font:12px "JetBrains Mono",monospace}
+.typing span{display:inline-flex;gap:4px}
+.typing span i{width:6px;height:6px;border-radius:50%;background:var(--c);animation:b 1.2s infinite}
+.typing span i:nth-child(2){animation-delay:.15s}.typing span i:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+
+/* composer */
+.comp{padding:14px 18px 18px}
+.box{display:flex;align-items:flex-end;gap:10px;padding:10px 10px 10px 16px;border-radius:18px;
+  border:1px solid rgba(var(--c-rgb),.35);background:rgba(8,7,10,.7);box-shadow:inset 0 0 0 1px rgba(255,255,255,.02),0 0 30px -16px rgba(var(--c-rgb),.6)}
+.box textarea{all:unset;flex:1;font:14px/1.5 Commissioner,sans-serif;color:var(--ink);min-height:24px;padding:4px 0}
+.box textarea::placeholder{color:var(--faint)}
+.send{all:unset;cursor:pointer;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:16px;
+  background:radial-gradient(circle at 35% 30%,#fff,rgba(var(--c-rgb),1) 45%);color:#0f0d10;box-shadow:0 0 18px rgba(var(--c-rgb),.6)}
+.meta{display:flex;gap:10px;align-items:center;margin-top:9px;font:10.5px "JetBrains Mono",monospace;color:var(--faint)}
+.meta .chip{padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.meta .sp{flex:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">ΣΧΕΔΙΟ — έτσι θα φαίνεται η συνομιλία μέσα στο Jarvis (αντί για terminal). Τα μηνύματα είναι παράδειγμα.</div>
+
+  <section class="chat">
+    <div class="hd">
+      <div class="orb"></div>
+      <div><h2>SiteWatch</h2><small>Codex Δικό μου · ~\Documents\Codex\…\alakse-sto-biographiko</small></div>
+      <div class="sp"></div>
+      <div class="seg"><button class="on">Chat</button><button>Terminal</button></div>
+      <span class="pill">ΔΟΥΛΕΥΕΙ</span>
+    </div>
+
+    <div class="log">
+      <div class="day">ΣΗΜΕΡΑ · 03:12</div>
+
+      <div class="me">Διάβασε το START_HERE.md και πες μου πού βρίσκεται το project SiteWatch και τι μένει να γίνει.</div>
+
+      <div class="ai"><div class="av"></div><div class="body">
+        <div class="acts">
+          <div class="act"><i>◎</i>Διάβασε 3 αρχεία · START_HERE.md, README.md, Reliability_Check.md</div>
+          <div class="act"><i>›_</i>Έτρεξε <code>npm test</code> <span class="ok">✓ 24 πέρασαν</span></div>
+        </div>
+        <p>Το <b>SiteWatch</b> είναι σχεδόν έτοιμο για το portfolio σου. Το demo δουλεύει και τα τεστ περνάνε.</p>
+        <p>Μένουν τρία πράγματα:</p>
+        <ul><li>το README στο GitHub χρειάζεται screenshots</li><li>λείπει σελίδα «About»</li><li>το Cloudflare deploy δεν έχει custom domain</li></ul>
+        <p>Θες να ξεκινήσω από τα screenshots;</p>
+      </div></div>
+
+      <div class="me">Ναι, πρόσθεσέ τα στο README.</div>
+
+      <div class="ai"><div class="av"></div><div class="body">
+        <details class="diff" open>
+          <summary><b>README.md</b><span class="add">+6</span><span class="rem">−1</span></summary>
+<pre><span class="d">  ## Demo</span>
+<span class="m">- (screenshots coming soon)</span>
+<span class="p">+ ![Dashboard](sitewatch-public-demo.png)</span>
+<span class="p">+ ![GitHub](sitewatch-github.png)</span></pre>
+        </details>
+        <div class="ask">
+          <div class="t">ΖΗΤΑΕΙ ΑΔΕΙΑ</div>
+          <div>Θέλει να ανεβάσει την αλλαγή στο GitHub:</div>
+          <code>git push origin main</code>
+          <div class="btns"><button class="btn go">Επιτρέπεται</button><button class="btn">Όχι</button><button class="btn">Πάντα για αυτό</button></div>
+        </div>
+      </div></div>
+
+      <div class="ai"><div class="av"></div><div class="typing">σκέφτεται <span><i></i><i></i><i></i></span></div></div>
+    </div>
+
+    <div class="comp">
+      <div class="box"><textarea rows="1" placeholder="Γράψε στο Codex…"></textarea><button class="send" aria-label="Αποστολή">➤</button></div>
+      <div class="meta"><span class="chip">GPT-6.1-Sol</span><span class="chip">ρωτάει πριν τις εντολές</span><span class="sp"></span><span>Enter αποστολή · Shift+Enter νέα γραμμή</span></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
