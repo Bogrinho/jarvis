@@ -53,6 +53,12 @@ async function shutdown(code = 0) {
   shuttingDown = true;
   log('shutting down');
   try { await jobs.killAll(); } catch { /* best effort */ }
+  // node-pty tears ConPTY down via short-lived helper processes; calling process.exit while one
+  // is still running hangs node on Windows (port stays bound). Wait for them, but not forever.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && process.getActiveResourcesInfo().includes('ProcessWrap')) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
   process.exit(code);
 }
 

@@ -1,12 +1,103 @@
 <!doctype html>
-<html lang="en">
+<html lang="el">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="jarvis-token" content="">
   <title>Jarvis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Jura:wght@300;400;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/vendor/xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <p>Jarvis is running. The HUD arrives in the next task.</p>
+<div class="app">
+
+  <header class="top">
+    <div class="brand"><b>JARVIS</b><sup>/ V2</sup><p>Your command center, reimagined</p></div>
+    <nav class="switch" id="switch" aria-label="Λογαριασμός"></nav>
+    <div class="clock">
+      <b id="clk">--:--</b><p id="day"></p>
+      <button class="ghost shut" id="shutdown" type="button">Shut down</button>
+    </div>
+  </header>
+
+  <div class="statusline">• Core · <span id="st">Idle</span> · Connected vault · Terminals · <span id="conn">Connecting…</span></div>
+
+  <section class="main">
+    <!-- left -->
+    <div>
+      <div class="h">System vitals <small>usage εβδομάδας</small></div>
+      <div id="vitals"></div>
+
+      <div class="card">
+        <div class="t" id="cardT">Weekly usage</div>
+        <div class="n"><span id="cardN">—</span><small id="cardU">% used</small></div>
+        <div class="scale" id="scale" style="--p:0%"></div>
+        <div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+      </div>
+
+      <div class="h">Directives <small>top 3</small></div>
+      <ul class="dir" id="dir"></ul>
+    </div>
+
+    <!-- core -->
+    <div class="core">
+      <canvas id="orb" width="880" height="880" aria-hidden="true"></canvas>
+      <h1 id="coreName">CLAUDE</h1>
+      <p class="sub" id="mode">Original Jarvis core · Claude Code mode</p>
+      <div class="states" id="states">
+        <span data-s="idle" class="on">Idle</span><span data-s="working">Working</span><span data-s="done">Done</span><span data-s="error">Error</span>
+      </div>
+      <div class="ready"><span id="ready">Ready · idle</span><button id="pause" type="button">Pause motion</button></div>
+      <div class="foot"><span>V2</span><span>Connected vault</span><span>Shared agent terminals</span></div>
+    </div>
+
+    <!-- right -->
+    <div>
+      <div class="h">Skills <small>quick access</small></div>
+      <div class="skills" id="skills"></div>
+      <p class="msg" id="skillsMsg" role="status" hidden></p>
+      <p class="note">Runs in the background · reports appear here</p>
+
+      <div class="h" style="margin-top:18px">Ask <small>στον ενεργό λογαριασμό</small></div>
+      <form class="ask" id="askForm" autocomplete="off">
+        <input id="askInput" placeholder="Ask or continue…" aria-label="Ερώτηση">
+        <button type="submit" aria-label="Αποστολή">↵</button>
+      </form>
+      <p class="msg" id="askMsg" role="status" hidden></p>
+      <button class="browse" id="openTerms" type="button">Open terminals</button>
+    </div>
+  </section>
+
+  <footer class="dock" id="dock">
+    <div class="bar">
+      <button id="tt" type="button">⌘ Terminals <span class="cnt" id="ttCount">0 open ^</span></button>
+      <div class="tabs" id="tabs"></div>
+      <span class="sp"></span>
+      <span class="pill">Shared with Obsidian</span>
+      <div class="newwrap">
+        <button class="pill solid" id="newTerm" type="button" aria-haspopup="true" aria-expanded="false">+ New terminal</button>
+        <div class="picker" id="picker" hidden>
+          <p class="pk-h" id="pickerH">Φάκελος</p>
+          <div id="pickerList"></div>
+          <p class="msg" id="pickerMsg" role="status" hidden></p>
+        </div>
+      </div>
+    </div>
+    <div class="drawer" id="drawer"></div>
+  </footer>
+</div>
+
+<div class="down" id="down" hidden>
+  <div>
+    <b>Jarvis is not running</b>
+    <p>Ξεκίνησε το Jarvis ξανά· η σελίδα θα συνδεθεί μόνη της.</p>
+  </div>
+</div>
+
+<script src="/vendor/xterm/xterm/lib/xterm.js"></script>
+<script src="/vendor/xterm/addon-fit/lib/addon-fit.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>
