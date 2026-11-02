@@ -540,6 +540,8 @@ function createChat(chat) {
   const view = createChatPane({
     info: chat,
     who: l ? l.display : chat.accountId,
+    cli: acc?.cli,
+    mode: acc?.mode,
     color,
     rgb: hexRgb(color).join(','),
     placeholder: `Γράψε στο ${cli}…`,

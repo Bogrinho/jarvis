@@ -260,7 +260,8 @@ test('state lists accounts with side, projects, quick commands and directives', 
   const r = await request(ctx, { path: '/api/state' });
   assert.equal(r.status, 200);
   const claude = r.json.accounts.find((a) => a.id === 'claude');
-  assert.deepEqual(claude, { id: 'claude', label: 'Claude', side: 'personal', color: claude.color, enabled: true, chat: false });
+  assert.deepEqual(claude, { id: 'claude', label: 'Claude', side: 'personal', color: claude.color, enabled: true, chat: false, cli: claude.cli, mode: claude.mode });
+  assert.ok(['codex', 'claude', 'gemini'].includes(claude.cli) && ['cautious', 'edit-in-project'].includes(claude.mode));
   assert.ok(r.json.accounts.every((a) => !('env' in a) && !('home' in a)));
   assert.ok(r.json.projects.some((p) => p.side === 'work'));
   assert.deepEqual(r.json.quickCommands[0], { id: 'plan-today', label: 'Plan Today' });

@@ -62,10 +62,18 @@ function dayLabel(iso) {
 }
 
 /**
- * createChatPane({ info, who, color, rgb, placeholder, api, onFocus, onClose })
+ * createChatPane({ info, who, cli, mode, color, rgb, placeholder, api, onFocus, onClose })
  * -> { node, focus(), setInfo(info), snapshot(info, items), addItem(item), delta(itemId, text), patch(itemId, patch), dispose() }
  */
-export function createChatPane({ info: initial, who, color, rgb, placeholder, api, onFocus, onClose }) {
+const PERMISSION_TEXT = {
+  'codex:cautious': 'μόνο ανάγνωση · ρωτάει για τα υπόλοιπα',
+  'codex:edit-in-project': 'αλλάζει αρχεία στο project · ρωτάει εκτός',
+  'claude:edit-in-project': 'δέχεται αλλαγές αρχείων · ρωτάει για εντολές',
+  'claude:cautious': 'ρωτάει πριν από αλλαγές και εντολές',
+};
+export const permissionText = (cli, mode) => PERMISSION_TEXT[`${cli}:${mode}`] ?? 'ρωτάει πριν από αλλαγές και εντολές';
+
+export function createChatPane({ info: initial, who, cli, mode, color, rgb, placeholder, api, onFocus, onClose }) {
   let info = { ...initial };
   const recs = new Map(); // itemId -> { item, node, answering }
   let tail = null; // { type:'me'|'ai'|'sys', body }
@@ -102,7 +110,7 @@ export function createChatPane({ info: initial, who, color, rgb, placeholder, ap
       h('div', { class: 'box' }, input, stop, send),
       h('div', { class: 'meta' },
         h('span', { class: 'chip', text: who }),
-        h('span', { class: 'chip', text: 'ρωτάει πριν τις εντολές' }),
+        h('span', { class: 'chip', text: permissionText(cli, mode) }),
         err,
         h('span', { class: 'sp' }),
         h('span', { class: 'hint', text: 'Enter αποστολή · Shift+Enter νέα γραμμή' }))));
