@@ -8,6 +8,9 @@
     "start": "node src/main.js"
   },
   "dependencies": {
-    "@lydell/node-pty": "^1.2.0-beta.18"
+    "@lydell/node-pty": "^1.2.0-beta.18",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "ws": "^8.22.1"
   }
 }
