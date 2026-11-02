@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import * as fsp from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const DAY_MS = 86_400_000;
@@ -6,31 +6,42 @@ const KEEP_MS = 14 * DAY_MS;
 const MIN_GAP_MS = 15 * 60_000;
 const MIN_SPAN_MS = 6 * 3_600_000;
 
-async function load(file) {
+async function load(file, io = fsp) {
   try {
-    const data = JSON.parse(await readFile(file, 'utf8'));
+    const data = JSON.parse(await io.readFile(file, 'utf8'));
     return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
   } catch {
     return {};
   }
 }
 
-async function save(file, data) {
-  await mkdir(dirname(file), { recursive: true });
+async function save(file, data, io) {
+  await io.mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify(data), 'utf8');
-  await rename(tmp, file);
+  try {
+    await io.writeFile(tmp, JSON.stringify(data), 'utf8');
+    await io.rename(tmp, file);
+  } catch (e) {
+    try { await io.unlink(tmp); } catch { /* best effort */ }
+    throw e;
+  }
 }
 
-export async function appendSnapshot(file, accountId, pct, at) {
+// `io` (fs/promises-like) is injectable for tests.
+export async function appendSnapshot(file, accountId, pct, at, io = fsp) {
   const t = at.getTime();
-  const data = await load(file);
-  const list = (Array.isArray(data[accountId]) ? data[accountId] : [])
-    .filter(p => p && Number.isFinite(p.at) && t - p.at <= KEEP_MS);
+  const data = await load(file, io);
+  const stored = Array.isArray(data[accountId]) ? data[accountId] : null;
+  const list = (stored ?? []).filter(p => p && Number.isFinite(p.at) && t - p.at <= KEEP_MS);
+  let changed = stored === null || list.length !== stored.length;
   const last = list[list.length - 1];
-  if (!last || t - last.at >= MIN_GAP_MS) list.push({ at: t, pct });
+  if (!last || t - last.at >= MIN_GAP_MS) {
+    list.push({ at: t, pct });
+    changed = true;
+  }
+  if (!changed) return;
   data[accountId] = list;
-  await save(file, data);
+  await save(file, data, io);
 }
 
 export async function getSeries(file, accountId, days = 7, now = new Date()) {

@@ -65,3 +65,41 @@ test('perDayRate 10→22 over 2 days is 6', () => {
 test('perDayRate restarts after a reset', () => {
   assert.equal(perDayRate([pt(0, 30), pt(1, 40), pt(2, 2), pt(3, 8)]), 6);
 });
+
+test('does not rewrite the file when nothing changed', async () => {
+  const fsp = await import('node:fs/promises');
+  const f = await tmpFile();
+  let writes = 0;
+  const io = { ...fsp, writeFile: async (...a) => { writes++; return fsp.writeFile(...a); } };
+  await appendSnapshot(f, 'a', 10, new Date(T0), io);
+  assert.equal(writes, 1);
+  const before = await readFile(f, 'utf8');
+  await appendSnapshot(f, 'a', 11, new Date(T0 + 5 * 60_000), io);
+  await appendSnapshot(f, 'a', 12, new Date(T0 + 14 * 60_000), io);
+  assert.equal(writes, 1);
+  assert.equal(await readFile(f, 'utf8'), before);
+  await appendSnapshot(f, 'a', 13, new Date(T0 + 15 * 60_000), io);
+  assert.equal(writes, 2);
+});
+
+test('rewrites when old points are pruned even without a new point', async () => {
+  const fsp = await import('node:fs/promises');
+  const f = await tmpFile();
+  await appendSnapshot(f, 'a', 1, new Date(T0));
+  await appendSnapshot(f, 'a', 2, new Date(T0 + 14 * DAY - 60_000));
+  // 1 minute later: too soon for a new point, but the first point is now older than 14 days.
+  await appendSnapshot(f, 'a', 3, new Date(T0 + 14 * DAY + 60_000));
+  const raw = JSON.parse(await fsp.readFile(f, 'utf8'));
+  assert.deepEqual(raw.a.map(p => p.pct), [2]);
+});
+
+test('a failed rename leaves no .tmp file and rethrows', async () => {
+  const fsp = await import('node:fs/promises');
+  const { dirname, basename } = await import('node:path');
+  const f = await tmpFile();
+  await fsp.mkdir(f, { recursive: true }); // target is a directory -> rename fails
+  await fsp.writeFile(join(f, 'x'), 'keep'); // non-empty so rename cannot replace it
+  await assert.rejects(appendSnapshot(f, 'a', 1, new Date(T0)));
+  const left = (await fsp.readdir(dirname(f))).filter(n => n.startsWith(basename(f)) && n.endsWith('.tmp'));
+  assert.deepEqual(left, []);
+});
