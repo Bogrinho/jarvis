@@ -522,6 +522,7 @@ function createPane(job) {
       term.loadAddon(fit);
     }
     term.open(host);
+    enableClipboard(term, host);
     term.onData((data) => sendWs({ type: 'input', id: job.id, data }));
     term.onResize(({ cols, rows }) => sendWs({ type: 'resize', id: job.id, cols, rows }));
   } else {
@@ -530,6 +531,47 @@ function createPane(job) {
   const pane = { kind: 'terminal', node, term, fit, title, stateEl, attached: false };
   panes.set(job.id, pane);
   return pane;
+}
+
+// Copy / paste like Windows Terminal:
+// - Ctrl+C copies when text is selected (otherwise it still stops the running command)
+// - Ctrl+V / Ctrl+Shift+V paste; Ctrl+Shift+C copies
+// - right click copies the selection, or pastes when nothing is selected
+async function copySelection(term) {
+  const text = term.getSelection();
+  if (!text) return false;
+  try { await navigator.clipboard.writeText(text); } catch { /* clipboard blocked */ }
+  term.clearSelection();
+  return true;
+}
+
+async function pasteClipboard(term) {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) term.paste(text);
+  } catch { /* clipboard blocked */ }
+}
+
+function enableClipboard(term, host) {
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown' || !e.ctrlKey || e.altKey || e.metaKey) return true;
+    const k = e.key.toLowerCase();
+    if (k === 'c' && (e.shiftKey || term.hasSelection())) {
+      e.preventDefault();
+      copySelection(term);
+      return false;
+    }
+    if (k === 'v') {
+      e.preventDefault();
+      pasteClipboard(term);
+      return false;
+    }
+    return true;
+  });
+  host.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (term.hasSelection()) copySelection(term); else pasteClipboard(term);
+  });
 }
 
 function createChat(chat) {
