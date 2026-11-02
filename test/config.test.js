@@ -45,5 +45,131 @@ test('rejects account with unknown mode', () => {
 });
 
 test('rejects personal-side account sharing a home with a work-side account', () => {
-  assert.throws(() => loadConfig(fx('shared-home.json')), (e) => e instanceof ConfigError && /home/.test(e.message));
+  assert.throws(() => loadConfig(fx('shared-home.json')), (e) => e instanceof ConfigError && /accounts.mine.home/.test(e.message));
+});
+
+// ---------- account / folder separation ----------
+
+function baseRaw() {
+  return {
+    port: 4777,
+    accounts: {
+      work: { label: 'Work', cli: 'codex', side: 'work', mode: 'cautious', home: null, env: { CODEX_HOME: 'C:\\x\\codex-work' } },
+      mine: { label: 'Mine', cli: 'codex', side: 'personal', mode: 'edit-in-project', home: 'C:\\x\\vault', env: { CODEX_HOME: 'C:\\x\\codex-personal' } },
+      claude: { label: 'Claude', cli: 'claude', side: 'personal', mode: 'edit-in-project', home: 'C:\\x\\vault', env: {} },
+    },
+    projects: [],
+    quickCommands: [],
+    directivesFile: 'vault/today.md',
+  };
+}
+
+function loadRaw(raw) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-cfg-'));
+  const file = path.join(dir, 'jarvis.config.json');
+  fs.writeFileSync(file, JSON.stringify(raw));
+  try {
+    return loadConfig(file);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const rejects = (raw, re) => assert.throws(() => loadRaw(raw), (e) => e instanceof ConfigError && re.test(e.message));
+
+test('base separation config loads', () => {
+  const c = loadRaw(baseRaw());
+  assert.equal(c.accounts.mine.env.CODEX_HOME, 'C:\\x\\codex-personal');
+});
+
+test('codex account without CODEX_HOME is rejected', () => {
+  const raw = baseRaw();
+  delete raw.accounts.mine.env.CODEX_HOME;
+  rejects(raw, /accounts\.mine\.env\.CODEX_HOME/);
+  const raw2 = baseRaw();
+  raw2.accounts.work.env = {};
+  rejects(raw2, /accounts\.work\.env\.CODEX_HOME/);
+  const raw3 = baseRaw();
+  raw3.accounts.mine.env.CODEX_HOME = '';
+  rejects(raw3, /accounts\.mine\.env\.CODEX_HOME/);
+  const raw4 = baseRaw();
+  delete raw4.accounts.mine.env;
+  rejects(raw4, /accounts\.mine\.env\.CODEX_HOME/);
+});
+
+test('personal codex sharing the work CODEX_HOME is rejected (case/slash-insensitive)', () => {
+  const raw = baseRaw();
+  raw.accounts.mine.env.CODEX_HOME = 'c:/X/Codex-Work/';
+  rejects(raw, /accounts\.mine\.env\.CODEX_HOME/);
+});
+
+test('personal codex using the default ~/.codex is rejected', () => {
+  const raw = baseRaw();
+  raw.accounts.mine.env.CODEX_HOME = path.join(os.homedir(), '.codex').toUpperCase();
+  rejects(raw, /accounts\.mine\.env\.CODEX_HOME/);
+});
+
+test('non-string env values are rejected', () => {
+  const raw = baseRaw();
+  raw.accounts.claude.env = { FOO: 1 };
+  rejects(raw, /accounts\.claude\.env\.FOO/);
+  const raw2 = baseRaw();
+  raw2.accounts.mine.env.CODEX_HOME = ['C:\\x\\a'];
+  rejects(raw2, /accounts\.mine\.env\.CODEX_HOME/);
+});
+
+test('account home inside a project of the other side is rejected', () => {
+  const raw = baseRaw();
+  raw.projects = [{ name: 'w', path: 'C:\\x', side: 'work' }];
+  rejects(raw, /accounts\.mine\.home/);
+  const raw2 = baseRaw();
+  raw2.projects = [{ name: 'w', path: 'c:/X/VAULT/', side: 'work' }];
+  rejects(raw2, /accounts\.mine\.home/);
+  const raw3 = baseRaw();
+  raw3.accounts.work.home = 'C:\\x\\workhome\\sub';
+  raw3.projects = [{ name: 'p', path: 'C:\\x\\workhome', side: 'personal' }];
+  rejects(raw3, /accounts\.work\.home/);
+});
+
+test('account home inside a project of its own side is fine', () => {
+  const raw = baseRaw();
+  raw.projects = [{ name: 'p', path: 'C:\\x', side: 'personal' }];
+  assert.equal(loadRaw(raw).projects.length, 1);
+});
+
+test('personal and work homes nested inside each other are rejected', () => {
+  const raw = baseRaw();
+  raw.accounts.work.home = 'C:\\x\\vault\\work';
+  rejects(raw, /home/);
+  const raw2 = baseRaw();
+  raw2.accounts.work.home = 'C:\\x';
+  rejects(raw2, /home/);
+});
+
+test('sibling paths sharing a name prefix are not treated as nested', () => {
+  const raw = baseRaw();
+  raw.accounts.mine.home = 'C:\\x\\Proj2';
+  raw.accounts.claude.home = 'C:\\x\\Proj2';
+  raw.accounts.work.home = 'C:\\x\\Proj';
+  raw.projects = [
+    { name: 'w', path: 'C:\\x\\Proj', side: 'work' },
+    { name: 'p', path: 'C:\\x\\Proj2', side: 'personal' },
+  ];
+  const c = loadRaw(raw);
+  assert.equal(c.projects.length, 2);
+});
+
+test('duplicate project paths are rejected regardless of side', () => {
+  const raw = baseRaw();
+  raw.projects = [
+    { name: 'a', path: 'C:\\y\\Proj', side: 'personal' },
+    { name: 'b', path: 'c:/y/proj/', side: 'personal' },
+  ];
+  rejects(raw, /projects\[1\]\.path/);
+  const raw2 = baseRaw();
+  raw2.projects = [
+    { name: 'a', path: 'C:\\y\\Proj', side: 'work' },
+    { name: 'b', path: 'C:\\Y\\PROJ', side: 'personal' },
+  ];
+  rejects(raw2, /projects\[1\]\.path/);
 });

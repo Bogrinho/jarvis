@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export class ConfigError extends Error {
@@ -26,6 +27,17 @@ function str(value, field) {
   return value;
 }
 
+// Case-insensitive, normalized comparison key for Windows paths (resolve drops trailing separators).
+const norm = (p) => path.resolve(p).toLowerCase();
+
+// True when `child` equals `parent` or lies inside it (separator-aware: C:\x\Proj2 is not inside C:\x\Proj).
+function isWithin(child, parent) {
+  const c = norm(child);
+  const p = norm(parent);
+  if (c === p) return true;
+  return c.startsWith(p.endsWith(path.sep) ? p : p + path.sep);
+}
+
 export function loadConfig(filePath) {
   const abs = path.resolve(filePath);
   const rootDir = path.dirname(abs);
@@ -45,7 +57,7 @@ export function loadConfig(filePath) {
     const f = `accounts.${id}`;
     if (!a || typeof a !== 'object') throw new ConfigError(`${f} must be an object`);
     if (a.env != null && (typeof a.env !== 'object' || Array.isArray(a.env))) throw new ConfigError(`${f}.env must be an object`);
-    accounts[id] = {
+    const account = {
       id,
       label: str(a.label, `${f}.label`),
       cli: oneOf(a.cli, CLIS, `${f}.cli`),
@@ -56,15 +68,24 @@ export function loadConfig(filePath) {
       enabled: a.enabled !== false,
       color: a.color ?? COLORS[id] ?? FALLBACK_COLOR,
     };
+    for (const [k, v] of Object.entries(account.env)) {
+      if (typeof v !== 'string') throw new ConfigError(`${f}.env.${k} must be a string`);
+    }
+    // Every Codex account must name its own login folder; never fall back to the default ~/.codex.
+    if (account.cli === 'codex') str(account.env.CODEX_HOME, `${f}.env.CODEX_HOME`);
+    accounts[id] = account;
   }
 
-  const norm = (p) => path.normalize(p).toLowerCase();
-  const workHomes = new Set(
-    Object.values(accounts).filter((a) => a.side === 'work' && a.home).map((a) => norm(a.home)),
-  );
-  for (const a of Object.values(accounts)) {
-    if (a.side === 'personal' && a.home && workHomes.has(norm(a.home))) {
-      throw new ConfigError(`accounts.${a.id}.home: personal account must not share a home with a work account`);
+  const list = Object.values(accounts);
+  const workCodexHomes = list.filter((a) => a.cli === 'codex' && a.side === 'work').map((a) => norm(a.env.CODEX_HOME));
+  const defaultCodexHome = norm(path.join(os.homedir(), '.codex'));
+  for (const a of list) {
+    if (a.cli !== 'codex' || a.side !== 'personal') continue;
+    const h = norm(a.env.CODEX_HOME);
+    if (h === defaultCodexHome || workCodexHomes.includes(h)) {
+      throw new ConfigError(
+        `accounts.${a.id}.env.CODEX_HOME: personal Codex must not use the work/default Codex home (${a.env.CODEX_HOME})`,
+      );
     }
   }
 
@@ -73,6 +94,28 @@ export function loadConfig(filePath) {
     path: resolve(str(p?.path, `projects[${i}].path`)),
     side: oneOf(p?.side, SIDES, `projects[${i}].side`),
   }));
+
+  // A folder may never be reachable from both sides.
+  const seen = new Map();
+  projects.forEach((p, i) => {
+    const k = norm(p.path);
+    if (seen.has(k)) throw new ConfigError(`projects[${i}].path duplicates projects[${seen.get(k)}].path (${p.path})`);
+    seen.set(k, i);
+  });
+  for (const a of list) {
+    if (!a.home) continue;
+    for (const p of projects) {
+      if (p.side !== a.side && isWithin(a.home, p.path)) {
+        throw new ConfigError(`accounts.${a.id}.home (${a.home}) is inside ${p.side} project ${p.name}`);
+      }
+    }
+    if (a.side !== 'personal') continue;
+    for (const w of list) {
+      if (w.side === 'work' && w.home && (isWithin(a.home, w.home) || isWithin(w.home, a.home))) {
+        throw new ConfigError(`accounts.${a.id}.home: personal home must not be the same as or nested with work home of ${w.id}`);
+      }
+    }
+  }
 
   const quickCommands = (raw.quickCommands ?? []).map((q, i) => ({
     id: str(q?.id, `quickCommands[${i}].id`),
