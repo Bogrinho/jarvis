@@ -29,7 +29,9 @@ export class CodexAppServer {
   #opts; #child = null; #starting = null; #pending = new Map(); #nextId = 1;
   #notif = new Set(); #reqHandlers = new Set(); #exitHandlers = new Set();
 
-  constructor({ codexCmd = 'codex', env = process.env, spawn = cp.spawn, file, args, log = console.warn } = {}) {
+  constructor({ codexCmd = 'codex', env, spawn = cp.spawn, file, args, log = console.warn } = {}) {
+    // Never inherit process.env by accident: it must be the account env from policy.buildEnv.
+    if (!env || typeof env !== 'object') throw new TypeError('CodexAppServer needs an explicit env (policy.buildEnv)');
     this.#opts = { codexCmd, env, spawn, file, args, log };
   }
 
@@ -252,10 +254,18 @@ const mapTurns = turns => withIds((turns ?? []).flatMap(t => (t.items ?? []).fla
 const V2_DECISION = { approve: 'accept', deny: 'decline', always: 'acceptForSession' };
 const LEGACY_DECISION = { approve: 'approved', always: 'approved_for_session', deny: { denied: { rejection: 'Declined in Jarvis' } } };
 
+const isDecision = d => typeof d === 'string' && Object.hasOwn(V2_DECISION, d);
+
+// Grant exactly what the approval card shows (see describePermissions), nothing more:
+// network.enabled and the fileSystem read/write path lists. Other requested fields
+// (entries, globScanMaxDepth, unknown keys) are never granted.
 function grantedPermissions(requested) {
   const out = {};
-  if (requested?.network) out.network = requested.network;
-  if (requested?.fileSystem) out.fileSystem = requested.fileSystem;
+  if (requested?.network?.enabled === true) out.network = { enabled: true };
+  const paths = list => (Array.isArray(list) && list.length && list.every(x => typeof x === 'string') ? [...list] : null);
+  const read = paths(requested?.fileSystem?.read);
+  const write = paths(requested?.fileSystem?.write);
+  if (read || write) out.fileSystem = { read, write };
   return out;
 }
 
@@ -272,9 +282,9 @@ const APPROVALS = {
   },
   'item/permissions/requestApproval': {
     describe: p => ({ title: 'Επιπλέον δικαιώματα', detail: joinDetail(p.reason, describePermissions(p.permissions)) }),
-    result: (d, p) => d === 'deny'
-      ? { permissions: {}, scope: 'turn' }
-      : { permissions: grantedPermissions(p.permissions), scope: d === 'always' ? 'session' : 'turn' },
+    result: (d, p) => (d === 'approve' || d === 'always')
+      ? { permissions: grantedPermissions(p.permissions), scope: d === 'always' ? 'session' : 'turn' }
+      : { permissions: {}, scope: 'turn' },
     cancel: () => ({ permissions: {}, scope: 'turn' }),
   },
   execCommandApproval: {
@@ -304,8 +314,11 @@ function describePermissions(perm) {
 
 // ---- adapter ------------------------------------------------------------------
 
+// Account permission mode -> app-server sandbox. Anything else is refused.
+const SANDBOX_BY_MODE = Object.freeze({ cautious: 'read-only', 'edit-in-project': 'workspace-write' });
+
 class CodexAdapter extends EventEmitter {
-  #server; #account; #cwd;
+  #server; #account; #cwd; #sandbox;
   #threadId = null; #needsResume = false;
   #activeTurn = null; #seenTurns = new Set();
   #state = 'idle';
@@ -320,6 +333,11 @@ class CodexAdapter extends EventEmitter {
     super();
     this.#server = server;
     this.#account = account ?? {};
+    const mode = this.#account.mode;
+    if (typeof mode !== 'string' || !Object.hasOwn(SANDBOX_BY_MODE, mode)) {
+      throw new Error(`Unknown Codex account mode "${mode}"`);
+    }
+    this.#sandbox = SANDBOX_BY_MODE[mode];
     this.#cwd = cwd;
     this.#unsub.push(
       server.onNotification((m, p) => this.#onNotification(m, p)),
@@ -329,7 +347,7 @@ class CodexAdapter extends EventEmitter {
   }
 
   #policy() {
-    return { approvalPolicy: 'on-request', sandbox: this.#account.mode === 'cautious' ? 'read-only' : 'workspace-write' };
+    return { approvalPolicy: 'on-request', sandbox: this.#sandbox };
   }
 
   async start({ resumeId } = {}) {
@@ -352,7 +370,8 @@ class CodexAdapter extends EventEmitter {
 
   async #send(text) {
     const input = [{ type: 'text', text, text_elements: [] }];
-    this.#setState('working');
+    // A pending approval still blocks the turn: stay 'waiting' until it is answered.
+    this.#setState(this.#approvals.size ? 'waiting' : 'working');
     if (this.#needsResume) {
       await this.#server.request('thread/resume', { threadId: this.#threadId, ...this.#policy(), excludeTurns: true });
       this.#needsResume = false;
@@ -384,7 +403,7 @@ class CodexAdapter extends EventEmitter {
     const rec = this.#approvals.get(token);
     if (!rec) throw new Error('No pending Codex approval for that token');
     const spec = APPROVALS[rec.method];
-    if (!(decision in V2_DECISION)) throw new Error(`Unknown decision "${decision}"`);
+    if (!isDecision(decision)) throw new Error(`Unknown decision "${decision}"`);
     this.#approvals.delete(token);
     rec.resolve(spec.result(decision, rec.params));
     if (!this.#approvals.size) this.#setState('working');
@@ -476,9 +495,19 @@ class CodexAdapter extends EventEmitter {
         this.emit('delta', rec.id, p.delta ?? '');
         break;
       }
-      case 'serverRequest/resolved':
-        for (const [token, rec] of this.#approvals) if (rec.requestId === p.requestId) this.#approvals.delete(token);
+      case 'serverRequest/resolved': {
+        // The server stopped waiting for this request on its own: the card must stop
+        // being answerable. ChatManager handles 'approval-expired' by expiring that card.
+        let hit = false;
+        for (const [token, rec] of this.#approvals) {
+          if (rec.requestId !== p.requestId) continue;
+          this.#approvals.delete(token);
+          hit = true;
+          this.emit('approval-expired', token);
+        }
+        if (hit && !this.#approvals.size && this.#activeTurn) this.#setState('working');
         break;
+      }
       case 'error':
         if (p.error?.message) {
           this.emit('item', { id: randomUUID(), kind: p.willRetry ? 'notice' : 'error', text: p.error.message });

@@ -340,3 +340,100 @@ test('close kills the server process', async () => {
   server.close();
   await exited;
 });
+
+// ---- review fixes ----
+
+test('CodexAppServer requires an explicit env', () => {
+  assert.throws(() => new CodexAppServer({ file: process.execPath, args: [FAKE] }), /env/);
+});
+
+test('unknown account mode is rejected; modes map explicitly', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  for (const mode of ['yolo', undefined, 'toString']) {
+    assert.throws(() => createCodexAdapter({ server, account: { mode }, cwd: 'C:\proj' }), /mode/);
+  }
+});
+
+test('prototype-key decisions are rejected and grant nothing', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\proj' });
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' } });
+  a.send('approve-perm');
+  const ap = await waitFor(() => ev.find(e => e[0] === 'approval'));
+  for (const bad of ['toString', 'constructor', '__proto__', 'hasOwnProperty', '']) {
+    assert.throws(() => a.answer(ap[1].token, bad), /decision/i);
+  }
+  // still pending and answerable; nothing was sent to the server yet
+  assert.equal((await server.request('fake/log', {})).received.filter(m => m.id === 1000 && !m.method).length, 0);
+  a.answer(ap[1].token, 'deny');
+  await waitFor(() => states(ev).includes('idle'));
+  assert.equal(ev.filter(e => e[0] === 'delta').map(e => e[2]).join(''),
+    'decision=' + JSON.stringify({ permissions: {}, scope: 'turn' }));
+});
+
+test('permissions grant only the displayed fields (network.enabled, fileSystem.read/write)', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'edit-in-project' }, cwd: 'C:\proj' });
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' } });
+  a.send('approve-perm-fs');
+  const ap = await waitFor(() => ev.find(e => e[0] === 'approval'));
+  assert.match(ap[1].detail, /C:\/a/);
+  a.answer(ap[1].token, 'approve');
+  await waitFor(() => states(ev).includes('idle'));
+  assert.equal(ev.filter(e => e[0] === 'delta').map(e => e[2]).join(''), 'decision=' + JSON.stringify({
+    permissions: { network: { enabled: true }, fileSystem: { read: ['C:/a'], write: null } }, scope: 'turn',
+  }));
+});
+
+test('two adapters on one server: approvals are isolated per thread', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const A = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\a' });
+  const B = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\b' });
+  const evA = record(A), evB = record(B);
+  await A.start({ conv: { id: 'a' } });
+  await B.start({ conv: { id: 'b' } });
+  B.send('approve-cmd');
+  const ap = await waitFor(() => evB.find(e => e[0] === 'approval'));
+  assert.throws(() => A.answer(ap[1].token, 'approve'));
+  B.answer(ap[1].token, 'deny');
+  await waitFor(() => states(evB).includes('idle'));
+  assert.deepEqual(evA, []);
+  assert.equal(evB.filter(e => e[0] === 'delta').map(e => e[2]).join(''), 'decision=' + JSON.stringify({ decision: 'decline' }));
+});
+
+test('send while an approval is pending keeps state waiting', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\proj' });
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' } });
+  a.send('approve-cmd');
+  const ap = await waitFor(() => ev.find(e => e[0] === 'approval'));
+  a.send('meanwhile'); // steer is rejected by the fake (no steer waiter) -> error, but must not flip to working first
+  await new Promise(r => setTimeout(r, 80));
+  const after = ev.slice(ev.indexOf(ap));
+  assert.ok(!after.some(e => e[0] === 'state' && e[1] === 'working'), JSON.stringify(after.filter(e => e[0] === 'state')));
+  a.interrupt();
+});
+
+test('serverRequest/resolved expires that approval and resumes working', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\proj' });
+  const ev = record(a);
+  a.on('approval-expired', tok => ev.push(['approval-expired', tok]));
+  await a.start({ conv: { id: 'c' } });
+  a.send('approve-resolved');
+  await waitFor(() => states(ev).includes('idle'));
+  const ap = ev.find(e => e[0] === 'approval');
+  const exp = ev.find(e => e[0] === 'approval-expired');
+  assert.equal(exp[1], ap[1].token);
+  assert.deepEqual(states(ev), ['working', 'waiting', 'working', 'idle']);
+  assert.throws(() => a.answer(ap[1].token, 'approve'));
+});

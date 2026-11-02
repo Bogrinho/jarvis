@@ -108,6 +108,25 @@ async function runTurn(threadId, turnId, text) {
       permissions: { network: { enabled: true }, fileSystem: null },
     });
     await message('m-dec', ['decision=' + JSON.stringify(r.result ?? r.error)]);
+  } else if (text === 'approve-perm-fs') {
+    const r = await ask('item/permissions/requestApproval', {
+      ...base, itemId: 'p-2', environmentId: null, startedAtMs: 1, cwd: 'C:/proj', reason: 'fs',
+      permissions: {
+        network: { enabled: true, extra: 'not shown' },
+        fileSystem: { read: ['C:/a'], write: null, globScanMaxDepth: 9, entries: [{ path: 'C:/', access: 'write' }] },
+      },
+    });
+    await message('m-dec', ['decision=' + JSON.stringify(r.result ?? r.error)]);
+  } else if (text === 'approve-resolved') {
+    // the server stops waiting on its own (e.g. the turn moved on) and says so
+    const id = nextServerReqId++;
+    waiting.set(id, () => {});
+    send({ jsonrpc: '2.0', id, method: 'item/commandExecution/requestApproval', params: {
+      kind: 'command', ...base, itemId: 'cmd-r', startedAtMs: 1, environmentId: null, reason: null, command: 'ls', cwd: 'C:/proj' } });
+    await new Promise(r => setTimeout(r, 80));
+    notify('serverRequest/resolved', { threadId, requestId: id });
+    await new Promise(r => setTimeout(r, 80));
+    await message('m-after', ['after']);
   } else if (text === 'approve-legacy') {
     const r = await ask('execCommandApproval', {
       conversationId: threadId, callId: 'call-1', approvalId: null, command: ['git', 'push'], cwd: 'C:\\proj', reason: null, parsedCmd: [],

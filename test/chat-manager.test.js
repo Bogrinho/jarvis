@@ -249,3 +249,33 @@ test('conversation ids are full UUIDs', async () => {
   const { mk } = await setup();
   assert.match((await mk()).id, /^[0-9a-f-]{36}$/);
 });
+
+test('prototype-key decisions are BAD_DECISION and forward nothing', async () => {
+  const { mgr, adapters, mk } = await setup();
+  const info = await mk();
+  adapters[0].emit('approval', { token: 't', title: 'x', detail: '' });
+  const it = mgr.get(info.id).items[0];
+  for (const bad of ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf']) {
+    assert.throws(() => mgr.answer(info.id, it.approvalId, bad), e => e.code === 'BAD_DECISION');
+  }
+  assert.equal(adapters[0].answers.length, 0);
+  assert.equal(mgr.get(info.id).items[0].state, 'pending');
+});
+
+test('adapter approval-expired expires only that approval', async () => {
+  const { mgr, adapters, mk } = await setup();
+  const info = await mk();
+  const updates = [];
+  mgr.on('update', (...a) => updates.push(a));
+  adapters[0].emit('approval', { token: 't1', title: 'one', detail: '' });
+  adapters[0].emit('approval', { token: 't2', title: 'two', detail: '' });
+  const [i1, i2] = mgr.get(info.id).items;
+  adapters[0].emit('approval-expired', 't1');
+  assert.equal(mgr.get(info.id).items[0].state, 'expired');
+  assert.equal(mgr.get(info.id).items[1].state, 'pending');
+  assert.deepEqual(updates, [[info.id, i1.id, { state: 'expired' }]]);
+  assert.throws(() => mgr.answer(info.id, i1.approvalId, 'approve'), e => e.code === 'NO_SUCH_APPROVAL');
+  mgr.answer(info.id, i2.approvalId, 'approve');
+  assert.deepEqual(adapters[0].answers, [['t2', 'approve']]);
+  adapters[0].emit('approval-expired', 'unknown'); // ignored
+});

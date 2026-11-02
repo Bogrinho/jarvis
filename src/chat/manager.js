@@ -107,7 +107,7 @@ export class ChatManager extends EventEmitter {
     if (!rec || !item || item.state !== 'pending') {
       throw new ChatError('NO_SUCH_APPROVAL', 'No pending approval with that id in this conversation');
     }
-    const next = DECISIONS[decision];
+    const next = typeof decision === 'string' && Object.hasOwn(DECISIONS, decision) ? DECISIONS[decision] : undefined;
     if (!next) throw new ChatError('BAD_DECISION', `Unknown decision "${decision}"`);
     // Mark first so a re-entrant or repeated answer can never forward twice.
     item.state = next;
@@ -222,6 +222,20 @@ export class ChatManager extends EventEmitter {
       if (command !== undefined) item.command = command;
       c.approvals.set(approvalId, { token, itemId: item.id });
       this.#addItem(c, item);
+    });
+    // The CLI stopped waiting for one approval (e.g. it was resolved elsewhere):
+    // expire just that card so it can no longer be answered.
+    adapter.on('approval-expired', token => {
+      for (const [approvalId, rec] of c.approvals) {
+        if (rec.token !== token) continue;
+        c.approvals.delete(approvalId);
+        const item = c.items.find(i => i.id === rec.itemId);
+        if (item && item.state === 'pending') {
+          item.state = 'expired';
+          this.#touch(c);
+          this.emit('update', id, item.id, { state: 'expired' });
+        }
+      }
     });
     adapter.on('exit', code => {
       const wasWorking = c.info.state === 'working' || c.info.state === 'waiting';
