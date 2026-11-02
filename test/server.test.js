@@ -425,3 +425,47 @@ test('usage refresh re-reads directives as a fallback and only broadcasts change
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(ws.received.filter((m) => m.type === 'directives').length, 1);
 });
+
+function upload(ctx, query, buf, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1', port: ctx.port, method: 'POST', path: `/api/upload?${query}`, setHost: false,
+      headers: { host: `127.0.0.1:${ctx.port}`, 'x-jarvis-token': TOKEN, 'content-type': 'application/octet-stream', 'content-length': buf.length, ...headers },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => { let json; try { json = JSON.parse(data); } catch { /* */ } resolve({ status: res.statusCode, json }); });
+    });
+    req.on('error', reject);
+    req.end(buf);
+  });
+}
+
+test('upload saves a file for a running terminal and returns its full path', async () => {
+  const ctx = await setup();
+  const job = (await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'claude', useHome: true } })).json;
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const r = await upload(ctx, `job=${job.id}&name=${encodeURIComponent('Στιγμιότυπο οθόνης (1).png')}`, png);
+  assert.equal(r.status, 201);
+  assert.ok(path.isAbsolute(r.json.path));
+  assert.ok(r.json.path.startsWith(path.join(ctx.dir, 'data', 'uploads')));
+  assert.match(path.basename(r.json.path), /-Στιγμιότυπο_οθόνης__1_\.png$/u);
+  assert.deepEqual(fs.readFileSync(r.json.path), png);
+  // a second upload with the same name never overwrites the first
+  const r2 = await upload(ctx, `job=${job.id}&name=${encodeURIComponent('Στιγμιότυπο οθόνης (1).png')}`, Buffer.from('x'));
+  assert.notEqual(r2.json.path, r.json.path);
+});
+
+test('upload refuses unknown terminals, bad names, path tricks and big files', async () => {
+  const ctx = await setup();
+  const job = (await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'claude', useHome: true } })).json;
+  assert.equal((await upload(ctx, 'job=nope&name=a.png', Buffer.from('x'))).status, 404);
+  assert.equal((await upload(ctx, `job=${job.id}`, Buffer.from('x'))).status, 400);
+  const sneaky = await upload(ctx, `job=${job.id}&name=${encodeURIComponent('..\..\evil.txt')}`, Buffer.from('x'));
+  assert.equal(sneaky.status, 201);
+  assert.equal(path.dirname(sneaky.json.path).startsWith(path.join(ctx.dir, 'data', 'uploads')), true);
+  assert.ok(!sneaky.json.path.includes('..'));
+  const big = await upload(ctx, `job=${job.id}&name=a.bin`, Buffer.alloc(26 * 1024 * 1024)).catch((e) => ({ status: e.code }));
+  assert.ok([413, 'EPIPE', 'ECONNRESET'].includes(big.status), String(big.status));
+  assert.equal((await upload(ctx, `job=${job.id}&name=a.png`, Buffer.from('x'), { 'x-jarvis-token': 'wrong' })).status, 403);
+});

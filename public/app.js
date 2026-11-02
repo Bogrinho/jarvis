@@ -478,11 +478,13 @@ function createPane(job) {
   const title = el('b');
   const stateEl = el('em', { class: 'chip' });
   const close = el('button', { type: 'button', class: 'x', 'aria-label': 'Κλείσιμο', text: '✕' });
+  const attach = el('button', { type: 'button', class: 'x', 'aria-label': 'Επισύναψη αρχείου', title: 'Επισύναψη εικόνας ή αρχείου', text: '📎' });
+  const picker = el('input', { type: 'file', multiple: true, hidden: true });
   const host = el('div', { class: 'xt' });
   const node = el('div', { class: 'term', style: { '--c': color, '--c-rgb': rgb } },
     el('header', {},
       el('span', { class: 'l' }, el('i', { class: 'dot', 'aria-hidden': 'true' }), title),
-      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, close)),
+      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, attach, close, picker)),
     el('div', { class: 'beam', 'aria-hidden': 'true' }),
     host);
   node.addEventListener('mousedown', () => { if (S.focused !== job.id) focusJob(job.id); });
@@ -523,6 +525,7 @@ function createPane(job) {
     }
     term.open(host);
     enableClipboard(term, host);
+    enableFiles(term, node, host, attach, picker, job.id);
     term.onData((data) => sendWs({ type: 'input', id: job.id, data }));
     term.onResize(({ cols, rows }) => sendWs({ type: 'resize', id: job.id, cols, rows }));
   } else {
@@ -553,6 +556,63 @@ async function pasteClipboard(term) {
     // The browser blocked reading the clipboard: Ctrl+V still works.
     term.focus();
   }
+}
+
+// Screenshots and files: Ctrl+V of an image, drag & drop, or the 📎 button. Each file is
+// saved by Jarvis and its full path is typed into the terminal; Claude, Codex and
+// Gemini read images and files from a path.
+const quotePath = (p) => (/\s/.test(p) ? `"${p}"` : p);
+
+async function uploadFiles(term, jobId, files) {
+  const paths = [];
+  for (const file of files) {
+    try {
+      const name = file.name || `screenshot-${Date.now()}.png`;
+      const res = await fetch(`/api/upload?job=${encodeURIComponent(jobId)}&name=${encodeURIComponent(name)}`, {
+        method: 'POST',
+        headers: { 'x-jarvis-token': TOKEN, 'content-type': 'application/octet-stream' },
+        body: file,
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      paths.push(quotePath((await res.json()).path));
+    } catch (e) {
+      term.write(`\r\n\x1b[31m[Jarvis] Δεν ανέβηκε το αρχείο ${file.name || ''} (${e.message === '413' ? 'πάνω από 25 MB' : 'σφάλμα'})\x1b[0m\r\n`);
+    }
+  }
+  if (paths.length) {
+    term.paste(paths.join(' ') + ' ');
+    term.focus();
+  }
+}
+
+function enableFiles(term, node, host, attach, picker, jobId) {
+  // capture phase: runs before xterm's own paste handler, so an image never arrives as text
+  host.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    uploadFiles(term, jobId, files);
+  }, true);
+  node.addEventListener('dragover', (e) => {
+    if (![...(e.dataTransfer?.types ?? [])].includes('Files')) return;
+    e.preventDefault();
+    node.classList.add('drop');
+  });
+  node.addEventListener('dragleave', (e) => { if (!node.contains(e.relatedTarget)) node.classList.remove('drop'); });
+  node.addEventListener('drop', (e) => {
+    node.classList.remove('drop');
+    const files = [...(e.dataTransfer?.files ?? [])];
+    if (!files.length) return;
+    e.preventDefault();
+    uploadFiles(term, jobId, files);
+  });
+  attach.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => {
+    const files = [...picker.files];
+    picker.value = '';
+    if (files.length) uploadFiles(term, jobId, files);
+  });
 }
 
 function enableClipboard(term, host) {

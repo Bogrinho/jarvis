@@ -2,7 +2,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { resolveTarget, buildLaunch, PolicyError } from './policy.js';
@@ -23,6 +23,34 @@ const VENDOR = {
 };
 const MAX_BODY = 64 * 1024;
 const MAX_WS_PAYLOAD = 1024 * 1024;
+const MAX_UPLOAD = 25 * 1024 * 1024; // screenshots and files pasted / dropped into a terminal
+
+// A safe file name: letters (any language), digits, dot, dash, underscore; no folders.
+function safeName(name) {
+  const base = String(name).split(/[\\/]/).pop().normalize('NFC');
+  const clean = base.replace(/[^\p{L}\p{N}._-]/gu, '_').replace(/^\.+/, '').slice(-100);
+  return clean || 'file';
+}
+
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    if (Number(req.headers['content-length'] ?? 0) > limit) {
+      req.resume();
+      return reject(new HttpError(413, 'FILE_TOO_LARGE'));
+    }
+    const chunks = [];
+    let size = 0;
+    let failed = false;
+    req.on('data', (c) => {
+      if (failed) return;
+      size += c.length;
+      if (size > limit) { failed = true; reject(new HttpError(413, 'FILE_TOO_LARGE')); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => { if (!failed) resolve(Buffer.concat(chunks)); });
+    req.on('error', reject);
+  });
+}
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -407,11 +435,29 @@ export function createServer({
     return send(res, 404, { error: 'NOT_FOUND' });
   }
 
+  // Saves a pasted / dropped file under data/uploads/<terminal id>/ and returns its full path,
+  // which the page then types into that terminal for the CLI to read.
+  async function handleUpload(req, res) {
+    const q = new URL(req.url, 'http://x').searchParams;
+    const id = q.get('job');
+    const name = q.get('name');
+    if (!jobs.list().some((j) => j.id === id)) { req.resume(); return send(res, 404, { error: 'NOT_FOUND' }); }
+    if (!name) { req.resume(); return send(res, 400, { error: 'BAD_NAME' }); }
+    const data = await readRaw(req, MAX_UPLOAD);
+    const dir = path.join(config.rootDir, 'data', 'uploads', safeName(id));
+    await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
+    const file = path.join(dir, `${stamp}-${crypto.randomBytes(3).toString('hex')}-${safeName(name)}`);
+    await writeFile(file, data, { flag: 'wx' });
+    return send(res, 201, { path: file });
+  }
+
   async function handleApi(req, res, pathname) {
     if (pathname === '/api/ping' && req.method === 'GET') return send(res, 200, 'jarvis');
     if (!tokenMatches(token, req.headers['x-jarvis-token'])) return send(res, 403, { error: 'FORBIDDEN' });
 
     if (pathname === '/api/state' && req.method === 'GET') return send(res, 200, await state());
+    if (pathname === '/api/upload' && req.method === 'POST') return handleUpload(req, res);
     if (pathname === '/api/jobs' && req.method === 'POST') {
       const body = await readJson(req);
       return send(res, 201, startJob(body));

@@ -186,3 +186,6 @@ button:focus-visible{outline:1px solid rgb(var(--acc-rgb));outline-offset:2px}
 .term .xterm-viewport::-webkit-scrollbar{width:6px}
 .term .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(var(--c-rgb),.35);border-radius:3px}
 @media (prefers-reduced-motion:reduce){.term[data-state="working"] .dot,.term[data-state="working"] .beam::after{animation:none}}
+
+/* a file being dragged over a terminal */
+.term.drop { outline: 2px dashed var(--c); outline-offset: -4px; }
