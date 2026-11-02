@@ -311,7 +311,7 @@ $('askForm').addEventListener('submit', async (e) => {
 });
 
 // ---------- "+ Νέα συζήτηση" picker: mode, folder, past conversations ----------
-const P = { mode: 'chat', folder: null, seq: 0 }; // Chat is the default every time the picker opens
+const P = { mode: 'terminal', folder: null, seq: 0 }; // Terminal is the default every time the picker opens
 
 function closePicker() {
   $('picker').hidden = true;
@@ -405,7 +405,7 @@ function openPicker() {
   const acc = selectedAccount();
   if (!acc) return;
   showMsg($('pickerMsg'), '');
-  P.mode = 'chat';
+  P.mode = 'terminal';
   const last = S.lastProject[acc.id];
   P.folder = last && S.projects.some((p) => p.path === last && p.side === acc.side) ? last : null;
   renderPicker();
