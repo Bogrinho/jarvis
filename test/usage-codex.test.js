@@ -8,6 +8,7 @@ import { readCodexUsage } from '../src/usage/codex.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fx = (name) => path.join(here, 'fixtures', name);
+const BEFORE = new Date((1793343758 - 3600) * 1000); // before the fixture reset times
 
 const line = (ts, p, w) =>
   JSON.stringify({
@@ -22,7 +23,7 @@ const line = (ts, p, w) =>
   });
 
 test('reads 5h and weekly percent', async () => {
-  const u = await readCodexUsage(fx('codex-home'));
+  const u = await readCodexUsage(fx('codex-home'), { now: BEFORE });
   assert.equal(u.kind, 'percent');
   assert.equal(u.fiveHour.pct, 40);
   assert.equal(u.weekly.pct, 13);
@@ -39,7 +40,7 @@ test('uses the newest rate_limits line', async () => {
     path.join(dir, 'sessions', 'r.jsonl'),
     [line('2026-11-01T10:00:00.000Z', 10, 5), '{"other":1}', line('2026-11-01T11:00:00.000Z', 55, 21)].join('\n') + '\n',
   );
-  const u = await readCodexUsage(dir);
+  const u = await readCodexUsage(dir, { now: BEFORE });
   assert.equal(u.fiveHour.pct, 55);
   assert.equal(u.weekly.pct, 21);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -51,7 +52,7 @@ test('missing sessions folder returns null', async () => {
 });
 
 test('ignores a half-written last line', async () => {
-  const u = await readCodexUsage(fx('codex-home-broken'));
+  const u = await readCodexUsage(fx('codex-home-broken'), { now: BEFORE });
   assert.equal(u.fiveHour.pct, 40);
 });
 
@@ -68,4 +69,15 @@ test('never opens auth.json', async () => {
   assert.ok(u);
   assert.ok(opened.length > 0);
   assert.ok(opened.every((p) => !p.toLowerCase().endsWith('auth.json')));
+});
+
+test('a window whose resetsAt is before now reports pct 0 with reset true', async () => {
+  // fixture: 5h resets 1793343758 (s), weekly resets 1793802196 (s)
+  const between = new Date((1793343758 + 60) * 1000);
+  const u = await readCodexUsage(fx('codex-home'), { now: between });
+  assert.equal(u.fiveHour.pct, 0);
+  assert.equal(u.fiveHour.reset, true);
+  assert.equal(u.fiveHour.resetsAt.getTime(), 1793343758000);
+  assert.equal(u.weekly.pct, 13);
+  assert.equal(u.weekly.reset, undefined);
 });

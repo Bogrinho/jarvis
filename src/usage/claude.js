@@ -14,36 +14,38 @@ function validWindow(w) {
   return { pct: w.pct, resetsAt };
 }
 
-async function readRateFile(rateFile, now) {
+async function readRateFile(rateFile, now, fsp) {
   if (!rateFile) return null;
   try {
-    const j = JSON.parse(await fs.promises.readFile(rateFile, 'utf8'));
+    const j = JSON.parse(await fsp.readFile(rateFile, 'utf8'));
     const fiveHour = validWindow(j.fiveHour);
     const weekly = validWindow(j.weekly);
     const updatedAt = new Date(j.updatedAt);
     if (!fiveHour || !weekly || Number.isNaN(updatedAt.getTime())) return null;
     const age = now.getTime() - updatedAt.getTime();
     if (age > RATE_MAX_AGE) return null;
-    return { kind: 'percent', fiveHour, weekly, plan: null, updatedAt };
+    const stale = (w) => (w.resetsAt.getTime() < now.getTime() ? { pct: 0, resetsAt: w.resetsAt, reset: true } : w);
+    return { kind: 'percent', fiveHour: stale(fiveHour), weekly: stale(weekly), plan: null, updatedAt };
   } catch {
     return null;
   }
 }
 
-async function listJsonl(dir, cutoffMs, out, depth = 0) {
+async function listJsonl(fsp, dir, cutoffMs, out, depth = 0) {
   if (depth > 6) return;
   let entries;
   try {
-    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    entries = await fsp.readdir(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const e of entries) {
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) await listJsonl(full, cutoffMs, out, depth + 1);
+    if (e.isDirectory()) await listJsonl(fsp, full, cutoffMs, out, depth + 1);
     else if (e.isFile() && e.name.toLowerCase().endsWith('.jsonl')) {
       try {
-        if ((await fs.promises.stat(full)).mtimeMs >= cutoffMs) out.push(full);
+        const st = await fsp.stat(full);
+        if (st.mtimeMs >= cutoffMs) out.push({ file: full, mtimeMs: st.mtimeMs, size: st.size });
       } catch {
         /* vanished */
       }
@@ -53,8 +55,12 @@ async function listJsonl(dir, cutoffMs, out, depth = 0) {
 
 const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-async function scanFile(file, entries) {
-  const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+// Parsed entries per file, keyed by path; reused while (mtimeMs, size) are unchanged.
+const fileCache = new Map();
+
+async function scanFile(fsx, file) {
+  const entries = [];
+  const rl = readline.createInterface({ input: fsx.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
   try {
     for await (const text of rl) {
       if (!text.includes('"usage"')) continue;
@@ -69,29 +75,41 @@ async function scanFile(file, entries) {
       if (!u || Number.isNaN(ts)) continue;
       // cache_read tokens are deliberately excluded.
       const tokens = n(u.input_tokens) + n(u.output_tokens) + n(u.cache_creation_input_tokens);
-      const id = o.message.id;
-      entries.set(id ? `id:${id}` : `anon:${entries.size}:${file}`, { ts, tokens });
+      entries.push({ ts, id: o.message.id ?? null, tokens });
     }
   } catch {
-    /* unreadable file: skip */
+    /* unreadable file: keep what was parsed */
   }
+  return entries;
 }
 
-async function sumTokens(claudeHome, now) {
+async function sumTokens(fsx, claudeHome, now) {
   const projects = path.join(claudeHome, 'projects');
   try {
-    if (!(await fs.promises.stat(projects)).isDirectory()) return null;
+    if (!(await fsx.stat(projects)).isDirectory()) return null;
   } catch {
     return null;
   }
   const t = now.getTime();
   const files = [];
-  await listJsonl(projects, t - SEVEN_D, files);
-  const entries = new Map(); // keyed by message id so streamed duplicates count once
-  for (const f of files) await scanFile(f, entries);
+  await listJsonl(fsx, projects, t - SEVEN_D, files);
+  const seen = new Set(files.map((f) => f.file));
+  for (const key of fileCache.keys()) {
+    if (key.startsWith(projects) && !seen.has(key)) fileCache.delete(key);
+  }
+  const byId = new Map(); // streamed duplicates count once (last record wins)
+  const anon = [];
+  for (const f of files) {
+    let c = fileCache.get(f.file);
+    if (!c || c.mtimeMs !== f.mtimeMs || c.size !== f.size) {
+      c = { mtimeMs: f.mtimeMs, size: f.size, entries: await scanFile(fsx, f.file) };
+      fileCache.set(f.file, c);
+    }
+    for (const e of c.entries) (e.id ? byId.set(e.id, e) : anon.push(e));
+  }
   let five = 0;
   let week = 0;
-  for (const { ts, tokens } of entries.values()) {
+  for (const { ts, tokens } of [...byId.values(), ...anon]) {
     const age = t - ts;
     if (age < 0 || age > SEVEN_D) continue;
     week += tokens;
@@ -100,12 +118,14 @@ async function sumTokens(claudeHome, now) {
   return { kind: 'tokens', fiveHour: { tokens: five }, weekly: { tokens: week }, updatedAt: now };
 }
 
-export async function readClaudeUsage({ claudeHome, rateFile, now = new Date() } = {}) {
+const defaultFs = { ...fs.promises, createReadStream: fs.createReadStream };
+
+export async function readClaudeUsage({ claudeHome, rateFile, now = new Date(), fs: fsx = defaultFs } = {}) {
   try {
-    const pct = await readRateFile(rateFile, now);
+    const pct = await readRateFile(rateFile, now, fsx);
     if (pct) return pct;
     if (!claudeHome) return null;
-    return await sumTokens(claudeHome, now);
+    return await sumTokens(fsx, claudeHome, now);
   } catch {
     return null;
   }

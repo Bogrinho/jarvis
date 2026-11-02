@@ -79,7 +79,11 @@ function parseLine(text) {
   };
 }
 
-export async function readCodexUsage(codexHome, { fs = fsDefault.promises } = {}) {
+function markReset(w, now) {
+  return w.resetsAt.getTime() < now.getTime() ? { pct: 0, resetsAt: w.resetsAt, reset: true } : w;
+}
+
+export async function readCodexUsage(codexHome, { fs = fsDefault.promises, now = new Date() } = {}) {
   if (!codexHome) return null;
   try {
     const files = [];
@@ -96,7 +100,7 @@ export async function readCodexUsage(codexHome, { fs = fsDefault.promises } = {}
       for (let i = lines.length - 1; i >= 0; i--) {
         if (!lines[i].includes('"rate_limits"')) continue;
         const r = parseLine(lines[i]);
-        if (r) return r;
+        if (r) return { ...r, fiveHour: markReset(r.fiveHour, now), weekly: markReset(r.weekly, now) };
       }
     }
     return null;
