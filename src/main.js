@@ -48,7 +48,7 @@ async function pingExisting() {
 // Token lives only in memory; the served index.html carries it to the HUD.
 const token = crypto.randomBytes(32).toString('hex');
 const jobs = new JobManager();
-const chat = createChat({ config, indexFile: path.join(dataDir, 'chats.json'), log });
+const chat = createChat({ config, indexFile: path.join(dataDir, 'chats.json'), rateFile: path.join(dataDir, 'claude-rate.json'), log });
 let shuttingDown = false;
 async function shutdown(code = 0) {
   if (shuttingDown) return;

@@ -3,7 +3,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const HOUR = 3600 * 1000;
-const RATE_MAX_AGE = 6 * HOUR;
+const RATE_MAX_AGE = 7 * 24 * HOUR; // older than a week: every window has reset
 const FIVE_H = 5 * HOUR;
 const SEVEN_D = 7 * 24 * HOUR;
 
@@ -128,5 +128,18 @@ export async function readClaudeUsage({ claudeHome, rateFile, now = new Date(), 
     return await sumTokens(fsx, claudeHome, now);
   } catch {
     return null;
+  }
+}
+
+// Saves the latest Claude limits (same file the status-line helper writes). Never throws.
+export async function writeClaudeRate(rateFile, { fiveHour, weekly }, { now = new Date(), fs: fsx = fs.promises } = {}) {
+  try {
+    await fsx.mkdir(path.dirname(rateFile), { recursive: true });
+    const tmp = `${rateFile}.${process.pid}.tmp`;
+    await fsx.writeFile(tmp, JSON.stringify({ fiveHour, weekly, updatedAt: now.toISOString() }));
+    await fsx.rename(tmp, rateFile);
+    return true;
+  } catch {
+    return false;
   }
 }

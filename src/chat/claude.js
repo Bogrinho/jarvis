@@ -293,8 +293,21 @@ class ClaudeAdapter extends EventEmitter {
       case 'control_request': this.#onControlRequest(msg); break;
       case 'control_cancel_request': this.#onCancel(msg.request_id); break;
       case 'result': this.#onResult(msg); break;
-      default: break; // control_response to our interrupt, rate_limit_event, ...
+      case 'rate_limit_event': this.#onRateLimits(msg.rate_limit_info); break;
+      default: break; // control_response to our interrupt, ...
     }
+  }
+
+  // The account's 5h / weekly limits; utilization is a 0-1 fraction (can pass 1 when over).
+  #onRateLimits(info) {
+    const win = (w) => {
+      if (!w || typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return null;
+      if (typeof w.resetsAt !== 'number' || !Number.isFinite(w.resetsAt)) return null;
+      return { pct: Math.round(w.utilization * 1000) / 10, resetsAt: new Date(w.resetsAt * 1000).toISOString() };
+    };
+    const fiveHour = win(info?.unifiedWindows?.five_hour);
+    const weekly = win(info?.unifiedWindows?.seven_day);
+    if (fiveHour && weekly) this.emit('rate-limits', { fiveHour, weekly });
   }
 
   #onStreamEvent(ev) {

@@ -4,10 +4,11 @@ import { buildEnv } from '../policy.js';
 import { ChatManager } from './manager.js';
 import { CodexAppServer, createCodexAdapter, listCodexThreads } from './codex.js';
 import { createClaudeAdapter as realClaudeAdapter, listClaudeSessions } from './claude.js';
+import { writeClaudeRate } from '../usage/claude.js';
 
 // Real chat wiring: one codex app-server per Codex account (lazy, own CODEX_HOME env),
 // one claude process per conversation, history listers for both.
-export function createChat({ config, indexFile, log = () => {}, deps = {} }) {
+export function createChat({ config, indexFile, rateFile = null, log = () => {}, deps = {} }) {
   const makeServer = deps.CodexAppServer ?? ((o) => new CodexAppServer(o));
   const makeClaude = deps.createClaudeAdapter ?? realClaudeAdapter;
   const servers = new Map(); // accountId -> CodexAppServer
@@ -25,7 +26,12 @@ export function createChat({ config, indexFile, log = () => {}, deps = {} }) {
     indexFile,
     adapters: {
       codex: (account, cwd) => createCodexAdapter({ server: codexServer(account), account, cwd }),
-      claude: (account, cwd) => makeClaude({ account, cwd, env: buildEnv(account.env ?? {}), claudeHome: claudeHome(account) }),
+      claude: (account, cwd) => {
+        const adapter = makeClaude({ account, cwd, env: buildEnv(account.env ?? {}), claudeHome: claudeHome(account) });
+        // Every Claude reply carries the account's 5h / weekly limits: keep the latest for the usage panel.
+        if (rateFile) adapter.on('rate-limits', (v) => { writeClaudeRate(rateFile, v).catch(() => {}); });
+        return adapter;
+      },
     },
   });
 

@@ -37,6 +37,10 @@ const ask = (request) => new Promise((resolve) => {
 
 async function run(userText) {
   send({ type: 'system', subtype: 'init', cwd: process.cwd(), session_id: SID, tools: [], permissionMode: argAfter('--permission-mode'), uuid: randomUUID() });
+  // Real shape from Claude Code 2.1.316 (utilization is a 0-1 fraction).
+  send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1793650800, rateLimitType: 'five_hour',
+    unifiedWindows: { five_hour: { utilization: 0.7, resetsAt: 1793650800, status: 'allowed' }, seven_day: { utilization: 0.33, resetsAt: 1794024000, status: 'allowed' } } },
+    uuid: randomUUID(), session_id: SID });
   if (userText === 'hello') {
     ev({ type: 'message_start', message: {} });
     ev({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });

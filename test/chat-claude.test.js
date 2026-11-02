@@ -494,3 +494,17 @@ test('a session that started elsewhere and later moved into the folder is listed
   // never in the folder: still hidden
   assert.deepEqual(await listClaudeSessions({ claudeHome: home, cwd: 'C:\Proj\Δύο' }), []);
 });
+
+test('rate limit events become rate-limits with percentages', async (t) => {
+  const { a } = mk();
+  t.after(() => a.close());
+  const got = [];
+  a.on('rate-limits', (v) => got.push(v));
+  await a.start();
+  a.send('hi');
+  await waitFor(() => got.length);
+  assert.deepEqual(got[0], {
+    fiveHour: { pct: 70, resetsAt: new Date(1793650800 * 1000).toISOString() },
+    weekly: { pct: 33, resetsAt: new Date(1794024000 * 1000).toISOString() },
+  });
+});

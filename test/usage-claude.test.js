@@ -21,8 +21,11 @@ test('prefers percent from a fresh rate file', async () => {
   assert.equal(u.plan, null);
 });
 
-test('ignores a rate file older than 6 hours and falls back to tokens', async () => {
-  const later = new Date(NOW.getTime() + 7 * 3600 * 1000 - 11 * 60 * 1000); // file is ~6h49m old
+test('keeps a day-old rate file (windows past reset show 0%) but ignores one older than 7 days', async () => {
+  const dayOld = await readClaudeUsage({ claudeHome: fx('claude-home'), rateFile: fx('claude-rate.json'), now: new Date(NOW.getTime() + 24 * 3600 * 1000) });
+  assert.equal(dayOld.kind, 'percent');
+  assert.equal(dayOld.fiveHour.reset, true);
+  const later = new Date(NOW.getTime() + 8 * 24 * 3600 * 1000);
   const u = await readClaudeUsage({ claudeHome: fx('claude-home'), rateFile: fx('claude-rate.json'), now: later });
   assert.equal(u.kind, 'tokens');
 });
@@ -55,6 +58,7 @@ test('collectUsage keeps going when one account throws', async () => {
       if (home.includes('personal')) throw new Error('boom');
       return pct;
     },
+    readCodexLive: async () => null,
     readClaudeUsage: async () => null,
   });
   assert.equal(r.mine.kind, 'none');
@@ -67,7 +71,7 @@ test('collectUsage keeps going when one account throws', async () => {
 test('gemini enabled reports no local usage data', async () => {
   const config = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
   config.accounts.gemini.enabled = true;
-  const r = await collectUsage(config, { readCodexUsage: async () => null, readClaudeUsage: async () => null });
+  const r = await collectUsage(config, { readCodexUsage: async () => null, readCodexLive: async () => null, readClaudeUsage: async () => null });
   assert.equal(r.gemini.reason, 'no local usage data');
 });
 
@@ -114,4 +118,31 @@ test('token scan caches per file: unchanged files are not re-read, changed ones 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('codex usage uses the newer of live limits and session files; live is asked at most every 5 minutes', async () => {
+  const config = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
+  config.accounts = { mine: config.accounts.mine };
+  const at = (iso, pct) => ({ kind: 'percent', fiveHour: { pct, resetsAt: new Date('2099-01-01') }, weekly: { pct, resetsAt: new Date('2099-01-01') }, plan: 'plus', updatedAt: new Date(iso) });
+  let liveCalls = 0;
+  let live = at('2026-11-02T16:00:00Z', 13);
+  const deps = {
+    readCodexUsage: async () => at('2026-11-02T10:00:00Z', 46),
+    readCodexLive: async (home) => { liveCalls++; assert.equal(home, config.accounts.mine.env.CODEX_HOME); return live; },
+    readClaudeUsage: async () => null,
+    liveCache: new Map(),
+  };
+  const t0 = new Date('2026-11-02T16:00:00Z');
+  assert.equal((await collectUsage(config, { ...deps, now: t0 })).mine.weekly.pct, 13);
+  live = at('2026-11-02T16:02:00Z', 99);
+  assert.equal((await collectUsage(config, { ...deps, now: new Date(t0.getTime() + 2 * 60000) })).mine.weekly.pct, 13);
+  assert.equal(liveCalls, 1);
+  assert.equal((await collectUsage(config, { ...deps, now: new Date(t0.getTime() + 6 * 60000) })).mine.weekly.pct, 99);
+  assert.equal(liveCalls, 2);
+  // live failing: the session files still answer
+  const r = await collectUsage(config, { ...deps, readCodexLive: async () => null, liveCache: new Map(), now: t0 });
+  assert.equal(r.mine.weekly.pct, 46);
+  // session files newer than live (Codex just ran here): files win
+  const r2 = await collectUsage(config, { ...deps, readCodexUsage: async () => at('2026-11-02T17:00:00Z', 50), liveCache: new Map(), now: t0 });
+  assert.equal(r2.mine.weekly.pct, 50);
 });

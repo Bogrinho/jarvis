@@ -74,3 +74,28 @@ test('gemini history is empty and closeAll closes every codex server', async (t)
   await chat.closeAll();
   assert.deepEqual(servers.map((s) => s.closed), [1, 1]);
 });
+
+test('claude rate limits are saved to the rate file', async (t) => {
+  withEnv(t);
+  const { EventEmitter } = await import('node:events');
+  const { readFile, mkdtemp, rm } = await import('node:fs/promises');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'jarvis-rate-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const rateFile = path.join(dir, 'data', 'claude-rate.json');
+  const adapter = Object.assign(new EventEmitter(), { close() {}, async start() { return { externalId: 'x' }; } });
+  const chat = createChat({
+    config, rateFile, indexFile: path.join(dir, 'chats.json'),
+    deps: { CodexAppServer: () => ({ close() {} }), createClaudeAdapter: () => adapter },
+  });
+  await chat.manager.create({ accountId: 'cl', account: config.accounts.cl, cwd: 'C:\\x', side: 'personal', title: 't' });
+  const v = { fiveHour: { pct: 70, resetsAt: '2026-11-02T20:00:00.000Z' }, weekly: { pct: 33, resetsAt: '2026-11-07T00:00:00.000Z' } };
+  adapter.emit('rate-limits', v);
+  let saved;
+  for (let i = 0; i < 100 && !saved; i++) {
+    try { saved = JSON.parse(await readFile(rateFile, 'utf8')); } catch { await new Promise((r) => setTimeout(r, 10)); }
+  }
+  assert.deepEqual(saved.fiveHour, v.fiveHour);
+  assert.deepEqual(saved.weekly, v.weekly);
+  assert.ok(!Number.isNaN(new Date(saved.updatedAt).getTime()));
+  await chat.closeAll();
+});
