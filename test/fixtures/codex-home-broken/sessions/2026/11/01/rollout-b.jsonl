@@ -1,0 +1,2 @@
+{"timestamp":"2026-11-01T18:24:55.773Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":40.0,"window_minutes":300,"resets_at":1793343758},"secondary":{"used_percent":13.0,"window_minutes":10080,"resets_at":1793802196},"plan_type":"team"}}}
+{"timestamp":"2026-11-01T19:00:00.000Z","payload":{"rate_limits":{"primary":{"used_per
