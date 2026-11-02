@@ -549,7 +549,10 @@ async function pasteClipboard(term) {
   try {
     const text = await navigator.clipboard.readText();
     if (text) term.paste(text);
-  } catch { /* clipboard blocked */ }
+  } catch {
+    // The browser blocked reading the clipboard: Ctrl+V still works.
+    term.focus();
+  }
 }
 
 function enableClipboard(term, host) {
@@ -561,11 +564,9 @@ function enableClipboard(term, host) {
       copySelection(term);
       return false;
     }
-    if (k === 'v') {
-      e.preventDefault();
-      pasteClipboard(term);
-      return false;
-    }
+    // Ctrl+V: don't send ^V to the program; let the browser's own paste reach xterm
+    // (needs no clipboard permission, unlike navigator.clipboard.readText).
+    if (k === 'v') return false;
     return true;
   });
   host.addEventListener('contextmenu', (e) => {
