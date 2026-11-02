@@ -12,6 +12,9 @@ const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 function makeConfig() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-policy-'));
   const raw = JSON.parse(fs.readFileSync(repoConfig, 'utf8'));
+  // Fixed homes so the tests don't depend on the user's own folders.
+  raw.accounts.work.home = null;
+  for (const id of ['mine', 'claude', 'gemini']) raw.accounts[id].home = 'vault';
   const workPath = path.join(dir, 'WorkProj');
   const personalPath = path.join(dir, 'PersonalProj');
   fs.mkdirSync(workPath);

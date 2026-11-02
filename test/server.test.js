@@ -63,6 +63,9 @@ afterEach(async () => {
 async function setup({ deps = {}, onShutdown = () => {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-server-'));
   const raw = JSON.parse(fs.readFileSync(repoConfig, 'utf8'));
+  // Fixed homes so the tests don't depend on the user's own folders.
+  raw.accounts.work.home = null;
+  for (const id of ['mine', 'claude', 'gemini']) raw.accounts[id].home = 'vault';
   const workPath = path.join(dir, 'WorkProj');
   const personalPath = path.join(dir, 'PersonalProj');
   fs.mkdirSync(workPath);
