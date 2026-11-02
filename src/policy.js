@@ -63,7 +63,7 @@ const STRIPPED_ENV = [
 ].map((k) => k.toLowerCase());
 
 // Windows env names are case-insensitive: drop any inherited spelling of a key we set or strip.
-function buildEnv(accountEnv) {
+export function buildEnv(accountEnv) {
   const drop = new Set([...STRIPPED_ENV, ...Object.keys(accountEnv).map((k) => k.toLowerCase())]);
   const env = {};
   for (const [k, v] of Object.entries(process.env)) if (!drop.has(k.toLowerCase())) env[k] = v;
