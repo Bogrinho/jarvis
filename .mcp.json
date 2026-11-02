@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jarvis-helpers": {
+      "command": "node",
+      "args": ["scripts/helpers-mcp.js"]
+    }
+  }
+}
