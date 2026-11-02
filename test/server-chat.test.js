@@ -330,3 +330,11 @@ test('shutdown route also closes chats', async () => {
   assert.equal(r.status, 200);
   assert.equal(ctx.adapters[0].closed, true);
 });
+
+test('state marks which accounts can chat (codex/claude yes, gemini no)', async () => {
+  const ctx = await setup();
+  const r = await request(ctx, { path: '/api/state' });
+  assert.equal(r.status, 200);
+  const chat = Object.fromEntries(r.json.accounts.map((a) => [a.id, a.chat]));
+  assert.deepEqual(chat, { work: true, mine: true, claude: true, gemini: false });
+});

@@ -236,7 +236,9 @@ export function createServer({
   async function state() {
     const directives = await readDirectivesSafe();
     return {
-      accounts: Object.values(config.accounts).map(({ id, label, side, color, enabled }) => ({ id, label, side, color, enabled })),
+      accounts: Object.values(config.accounts).map(({ id, label, side, color, enabled, cli }) => ({
+        id, label, side, color, enabled, chat: Boolean(chats) && CHAT_CLIS.has(cli),
+      })),
       projects: config.projects.map(({ name, path: p, side }) => ({ name, path: p, side })),
       quickCommands: config.quickCommands.map(({ id, label }) => ({ id, label })),
       jobs: jobs.list(),

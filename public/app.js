@@ -1,6 +1,7 @@
 // Jarvis HUD: wires the mockup layout to /api/state and the /ws socket.
 // Everything from the server is data: it only ever reaches the DOM via textContent.
 import { createOrb } from './orb.js';
+import { h as el, createChatPane, fmtAgo } from './chat.js';
 
 const TOKEN = document.querySelector('meta[name="jarvis-token"]')?.content ?? '';
 const $ = (id) => document.getElementById(id);
@@ -21,24 +22,16 @@ const ERRORS = {
   SIDE_MISMATCH: 'Αυτό το project δεν επιτρέπεται με αυτόν τον λογαριασμό',
   UNKNOWN_PROJECT: 'Αυτό το project δεν υπάρχει πια στο jarvis.config.json',
   DISABLED: 'Ο λογαριασμός δεν έχει ρυθμιστεί ακόμα',
+  NO_SUCH_HISTORY: 'Αυτή η συζήτηση δεν βρέθηκε σε αυτόν τον φάκελο',
+  CHAT_UNSUPPORTED: 'Αυτός ο λογαριασμός δουλεύει μόνο σε terminal',
+  START_FAILED: 'Η συζήτηση δεν ξεκίνησε· δες ότι το CLI είναι εγκατεστημένο και συνδεδεμένο',
+  HISTORY_UNAVAILABLE: 'Το ιστορικό δεν είναι διαθέσιμο αυτή τη στιγμή',
 };
 const errorText = (code) => ERRORS[code] ?? `Κάτι πήγε στραβά (${code})`;
-const STATE_LABEL = { idle: 'Idle', working: 'Working', done: 'Done', error: 'Error' };
+const STATE_LABEL = { idle: 'Idle', working: 'Working', waiting: 'Waiting', done: 'Done', error: 'Error' };
 const DAYS = ['ΚΥΡ', 'ΔΕΥ', 'ΤΡΙ', 'ΤΕΤ', 'ΠΕΜ', 'ΠΑΡ', 'ΣΑΒ'];
 
 // ---------- small helpers ----------
-function el(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === 'class') node.className = v;
-    else if (k === 'text') node.textContent = v;
-    else if (k === 'style') for (const [p, val] of Object.entries(v)) node.style.setProperty(p, val);
-    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v);
-  }
-  for (const c of children) if (c != null) node.append(c);
-  return node;
-}
 const store = {
   get(key, fallback) {
     try {
@@ -91,6 +84,7 @@ const S = {
   projects: [],
   quickCommands: [],
   jobs: [],
+  chats: [],
   usage: {},
   directives: [],
   selected: store.get('jarvis.account', 'claude'),
@@ -99,6 +93,7 @@ const S = {
 };
 const account = (id) => S.accounts.find((a) => a.id === id);
 const selectedAccount = () => account(S.selected);
+const canChat = (acc) => acc?.chat === true;
 
 // ---------- API ----------
 class ApiError extends Error {
@@ -274,12 +269,15 @@ function forgetProject(accountId, code) {
   store.set('jarvis.lastProject', S.lastProject);
 }
 
-async function startJob(body, msgNode, button, onError) {
+// kind 'chat' -> a conversation (POST /api/chats); 'terminal' -> a terminal job (POST /api/jobs).
+const kindFor = (acc) => (canChat(acc) ? 'chat' : 'terminal');
+
+async function startSession(kind, body, msgNode, button, onError) {
   showMsg(msgNode, '');
   if (button) button.disabled = true;
   try {
-    const info = await api('POST', '/api/jobs', body);
-    upsertJob(info);
+    const info = await api('POST', kind === 'chat' ? '/api/chats' : '/api/jobs', body);
+    if (kind === 'chat') upsertChat(info); else upsertJob(info);
     focusJob(info.id, true);
     return info;
   } catch (e) {
@@ -292,7 +290,7 @@ async function startJob(body, msgNode, button, onError) {
 }
 
 function runQuick(q, button) {
-  startJob({ accountId: S.selected, quickCommandId: q.id }, $('skillsMsg'), button);
+  startSession(kindFor(selectedAccount()), { accountId: S.selected, quickCommandId: q.id }, $('skillsMsg'), button);
 }
 
 $('askForm').addEventListener('submit', async (e) => {
@@ -302,7 +300,8 @@ $('askForm').addEventListener('submit', async (e) => {
   if (!prompt) return;
   const accountId = S.selected;
   const last = S.lastProject[accountId];
-  const info = await startJob(
+  const info = await startSession(
+    kindFor(account(accountId)),
     { accountId, projectPath: last ?? undefined, useHome: !last, prompt },
     $('askMsg'),
     null,
@@ -311,39 +310,115 @@ $('askForm').addEventListener('submit', async (e) => {
   if (info) input.value = '';
 });
 
-// ---------- new-terminal picker ----------
+// ---------- "+ Νέα συζήτηση" picker: mode, folder, past conversations ----------
+const P = { mode: 'chat', folder: null, seq: 0 }; // Chat is the default every time the picker opens
+
 function closePicker() {
   $('picker').hidden = true;
   $('newTerm').setAttribute('aria-expanded', 'false');
 }
+
+async function pick(kind, projectPath, resumeId, button) {
+  const acc = selectedAccount();
+  if (!acc) return;
+  const body = projectPath ? { accountId: acc.id, projectPath } : { accountId: acc.id, useHome: true };
+  if (resumeId) body.resumeId = resumeId;
+  const info = await startSession(kind, body, $('pickerMsg'), button,
+    (code) => { if (projectPath && S.lastProject[acc.id] === projectPath) forgetProject(acc.id, code); });
+  if (!info) return;
+  if (projectPath) S.lastProject[acc.id] = projectPath;
+  else delete S.lastProject[acc.id];
+  store.set('jarvis.lastProject', S.lastProject);
+  closePicker();
+}
+
+async function loadHistory(acc, folder, box) {
+  const seq = ++P.seq;
+  const q = new URLSearchParams({ accountId: acc.id });
+  if (folder) q.set('projectPath', folder); else q.set('useHome', '1');
+  let list;
+  try {
+    list = await api('GET', `/api/chat-history?${q}`);
+  } catch (e) {
+    if (seq === P.seq) box.replaceChildren(el('p', { class: 'pk-empty', text: errorText(e.code) }));
+    return;
+  }
+  if (seq !== P.seq) return; // the user picked another folder meanwhile
+  box.replaceChildren();
+  const items = (Array.isArray(list) ? list : [])
+    .filter((it) => it && typeof it.externalId === 'string')
+    .sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+    .slice(0, 30);
+  if (!items.length) box.append(el('p', { class: 'pk-empty', text: 'Καμία προηγούμενη συζήτηση εδώ' }));
+  for (const it of items) {
+    const title = String(it.title || '(χωρίς τίτλο)');
+    box.append(el('button', { type: 'button', title, onclick: (e) => pick('chat', folder, it.externalId, e.currentTarget) },
+      title, el('small', { text: fmtAgo(it.updatedAt) })));
+  }
+}
+
+function renderPicker() {
+  const acc = selectedAccount();
+  if (!acc) return;
+  const chat = canChat(acc) && P.mode === 'chat';
+  $('pickerMode').hidden = !canChat(acc);
+  for (const b of $('pickerMode').querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.mode === (chat ? 'chat' : 'terminal')));
+  }
+  $('pickerH').textContent = `${look(acc).display} · ${chat ? 'νέα συζήτηση' : 'νέο terminal'}`;
+  const list = $('pickerList');
+  list.replaceChildren();
+  // Mirrors the server's side rule: an account may only open projects of its own side.
+  const folders = [
+    ...S.projects.filter((pr) => pr.side === acc.side).map((p) => ({ path: p.path, name: p.name, sub: p.path })),
+    { path: null, name: 'Home folder', sub: 'φάκελος του λογαριασμού' },
+  ];
+  for (const f of folders) {
+    const sel = chat && f.path === P.folder;
+    list.append(el('button', {
+      type: 'button',
+      class: sel ? 'sel' : '',
+      'aria-pressed': chat ? String(sel) : null,
+      onclick: (e) => {
+        if (!chat) { pick('terminal', f.path, undefined, e.currentTarget); return; }
+        P.folder = f.path;
+        renderPicker();
+      },
+    }, f.name, el('small', { text: f.sub })));
+  }
+  const hist = $('pickerHistory');
+  hist.replaceChildren();
+  if (chat) {
+    const box = el('div', {}, el('p', { class: 'pk-empty', text: 'φόρτωση…' }));
+    hist.append(
+      el('button', { type: 'button', class: 'pk-go', onclick: (e) => pick('chat', P.folder, undefined, e.currentTarget) }, 'Ξεκίνα συζήτηση →'),
+      el('p', { class: 'pk-sub', text: 'Συνέχεια συζήτησης' }),
+      box,
+    );
+    loadHistory(acc, P.folder, box);
+  } else {
+    P.seq++;
+  }
+}
+
 function openPicker() {
   const acc = selectedAccount();
   if (!acc) return;
-  const list = $('pickerList');
-  list.replaceChildren();
   showMsg($('pickerMsg'), '');
-  $('pickerH').textContent = `${look(acc).display} · φάκελος`;
-  const pick = async (projectPath) => {
-    const info = await startJob(
-      projectPath ? { accountId: acc.id, projectPath } : { accountId: acc.id, useHome: true },
-      $('pickerMsg'),
-      null,
-      (code) => { if (projectPath && S.lastProject[acc.id] === projectPath) forgetProject(acc.id, code); },
-    );
-    if (!info) return;
-    if (projectPath) S.lastProject[acc.id] = projectPath;
-    else delete S.lastProject[acc.id];
-    store.set('jarvis.lastProject', S.lastProject);
-    closePicker();
-  };
-  // Mirrors the server's side rule: an account may only open projects of its own side.
-  for (const p of S.projects.filter((pr) => pr.side === acc.side)) {
-    list.append(el('button', { type: 'button', onclick: () => pick(p.path) }, p.name, el('small', { text: p.path })));
-  }
-  list.append(el('button', { type: 'button', onclick: () => pick(null) }, 'Home folder', el('small', { text: 'φάκελος του λογαριασμού' })));
+  P.mode = 'chat';
+  const last = S.lastProject[acc.id];
+  P.folder = last && S.projects.some((p) => p.path === last && p.side === acc.side) ? last : null;
+  renderPicker();
   $('picker').hidden = false;
   $('newTerm').setAttribute('aria-expanded', 'true');
-  list.querySelector('button')?.focus();
+  $('picker').querySelector('#pickerList button')?.focus();
+}
+for (const b of $('pickerMode').querySelectorAll('button')) {
+  b.addEventListener('click', () => {
+    P.mode = b.dataset.mode === 'terminal' ? 'terminal' : 'chat';
+    showMsg($('pickerMsg'), '');
+    renderPicker();
+  });
 }
 $('newTerm').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -353,14 +428,23 @@ $('picker').addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', closePicker);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
 
-// ---------- jobs: dock, drawer, terminals ----------
-const panes = new Map(); // jobId -> { node, term, fit, header refs }
-const visibleJobs = () => S.jobs;
+// ---------- sessions (terminal jobs + chats): dock, drawer, panes ----------
+const panes = new Map(); // id -> terminal pane { kind:'terminal', node, term, fit, ... } | chat pane { kind:'chat', view, node }
+// Terminals and chats share one dock, oldest first.
+const visibleJobs = () => [
+  ...S.jobs.map((j) => ({ kind: 'terminal', id: j.id, accountId: j.accountId, title: j.title, state: j.state, cwd: j.cwd, t: Number(j.startedAt) || 0, info: j })),
+  ...S.chats.map((c) => ({ kind: 'chat', id: c.id, accountId: c.accountId, title: c.title, state: c.state, cwd: c.cwd, t: Date.parse(c.createdAt) || 0, info: c })),
+].sort((a, b) => a.t - b.t);
 const dockOpen = () => $('dock').classList.contains('open');
 
 function upsertJob(info) {
   const i = S.jobs.findIndex((j) => j.id === info.id);
   if (i === -1) S.jobs.push(info); else S.jobs[i] = { ...S.jobs[i], ...info };
+  renderJobs();
+}
+function upsertChat(info) {
+  const i = S.chats.findIndex((c) => c.id === info.id);
+  if (i === -1) S.chats.push(info); else S.chats[i] = { ...S.chats[i], ...info };
   renderJobs();
 }
 
@@ -379,7 +463,7 @@ function focusJob(id, open = false) {
   const pane = panes.get(id);
   if (pane && dockOpen()) {
     pane.node.scrollIntoView({ block: 'nearest' });
-    pane.term?.focus();
+    if (pane.kind === 'chat') pane.view.focus(); else pane.term?.focus();
   }
 }
 
@@ -402,7 +486,7 @@ function createPane(job) {
     el('div', { class: 'beam', 'aria-hidden': 'true' }),
     host);
   node.addEventListener('mousedown', () => { if (S.focused !== job.id) focusJob(job.id); });
-  close.addEventListener('click', () => closeJob(job.id));
+  close.addEventListener('click', () => closeSession(job.id));
 
   let term = null;
   let fit = null;
@@ -443,8 +527,28 @@ function createPane(job) {
   } else {
     host.textContent = 'xterm.js failed to load';
   }
-  const pane = { node, term, fit, title, stateEl, attached: false };
+  const pane = { kind: 'terminal', node, term, fit, title, stateEl, attached: false };
   panes.set(job.id, pane);
+  return pane;
+}
+
+function createChat(chat) {
+  const acc = account(chat.accountId);
+  const color = safeColor(acc?.color);
+  const l = acc ? look(acc) : null;
+  const cli = l ? l.name.charAt(0) + l.name.slice(1).toLowerCase() : 'AI';
+  const view = createChatPane({
+    info: chat,
+    who: l ? l.display : chat.accountId,
+    color,
+    rgb: hexRgb(color).join(','),
+    placeholder: `Γράψε στο ${cli}…`,
+    api,
+    onFocus: () => { if (S.focused !== chat.id) focusJob(chat.id); },
+    onClose: () => closeSession(chat.id),
+  });
+  const pane = { kind: 'chat', view, node: view.node, attached: false };
+  panes.set(chat.id, pane);
   return pane;
 }
 
@@ -452,7 +556,7 @@ function attachPane(id) {
   const pane = panes.get(id);
   if (!pane || ws?.readyState !== WebSocket.OPEN) return;
   pane.attached = true;
-  sendWs({ type: 'attach', id });
+  sendWs({ type: pane.kind === 'chat' ? 'chat-attach' : 'attach', id }); // chat-attach replies with a full snapshot
 }
 
 function fitAll() {
@@ -466,7 +570,22 @@ function fitAll() {
 let fitTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitAll, 120); });
 
-function closeJob(id) {
+async function closeChat(id) {
+  const chat = S.chats.find((c) => c.id === id);
+  if (!chat) return;
+  const busy = chat.state === 'working' || chat.state === 'waiting';
+  if (busy && !confirm(`Η συζήτηση "${chat.title}" δουλεύει ακόμα. Κλείσιμο;`)) return;
+  try {
+    await api('DELETE', `/api/chats/${id}`);
+  } catch (e) {
+    if (e.code !== 'NO_SUCH_CHAT') { alert(errorText(e.code)); return; }
+  }
+  S.chats = S.chats.filter((c) => c.id !== id); // the server's chats broadcast says the same
+  renderJobs();
+}
+
+function closeSession(id) {
+  if (S.chats.some((c) => c.id === id)) { closeChat(id); return; }
   const job = S.jobs.find((j) => j.id === id);
   if (!job) return;
   const live = job.state === 'working' || job.state === 'idle';
@@ -501,32 +620,40 @@ function renderJobs() {
   for (const job of jobs) {
     let pane = panes.get(job.id);
     if (!pane) {
-      pane = createPane(job);
+      pane = job.kind === 'chat' ? createChat(job.info) : createPane(job.info);
       drawer.append(pane.node);
       attachPane(job.id);
       added = true;
     }
-    pane.title.textContent = job.title;
-    pane.stateEl.textContent = STATE_LABEL[job.state] ?? job.state;
-    pane.node.dataset.state = job.state;
+    if (pane.kind === 'chat') {
+      pane.view.setInfo(job.info);
+    } else {
+      pane.title.textContent = job.title;
+      pane.stateEl.textContent = STATE_LABEL[job.state] ?? job.state;
+      pane.node.dataset.state = job.state;
+    }
     pane.node.classList.toggle('focus', job.id === S.focused);
   }
   for (const [id, pane] of panes) {
     if (!jobs.some((j) => j.id === id)) {
-      pane.term?.dispose();
+      if (pane.kind === 'chat') pane.view.dispose(); else pane.term?.dispose();
       pane.node.remove();
       panes.delete(id);
     }
   }
+  // keep the drawer in session order; only move nodes when needed (moving resets scroll positions)
+  const order = jobs.map((j) => panes.get(j.id).node);
+  if (order.some((n, i) => drawer.children[i] !== n)) for (const n of order) drawer.append(n);
   drawer.style.setProperty('--cols', String(Math.max(1, Math.min(3, jobs.length))));
   if (added) requestAnimationFrame(fitAll);
   renderStates();
 }
 
 function renderStates() {
-  const job = S.jobs.find((j) => j.id === S.focused);
+  const job = visibleJobs().find((j) => j.id === S.focused);
   const state = job?.state ?? 'idle';
-  for (const s of $('states').querySelectorAll('span')) s.classList.toggle('on', s.dataset.s === state);
+  const lit = state === 'waiting' ? 'working' : state; // the core has no separate "waiting" light
+  for (const s of $('states').querySelectorAll('span')) s.classList.toggle('on', s.dataset.s === lit);
   $('st').textContent = STATE_LABEL[state] ?? state;
   $('ready').textContent = job ? `${job.title} · ${STATE_LABEL[state] ?? state}` : 'Ready · idle';
 }
@@ -541,6 +668,8 @@ function setDown(down) {
   $('conn').textContent = down ? 'Offline' : (ws?.readyState === WebSocket.OPEN ? 'Connected' : 'Connecting…');
 }
 
+const chatPane = (id) => { const p = panes.get(id); return p?.kind === 'chat' ? p.view : null; };
+
 function onMessage(ev) {
   let msg;
   try { msg = JSON.parse(ev.data); } catch { return; }
@@ -553,6 +682,25 @@ function onMessage(ev) {
       break;
     case 'directives':
       if (Array.isArray(msg.list)) { S.directives = msg.list; renderDirectives(); }
+      break;
+    case 'chats':
+      if (Array.isArray(msg.list)) { S.chats = msg.list; renderJobs(); }
+      break;
+    case 'chat-snapshot':
+      if (msg.info && typeof msg.info === 'object') {
+        const i = S.chats.findIndex((c) => c.id === msg.id);
+        if (i !== -1) S.chats[i] = { ...S.chats[i], ...msg.info };
+      }
+      chatPane(msg.id)?.snapshot(msg.info, msg.items);
+      break;
+    case 'chat-item':
+      chatPane(msg.id)?.addItem(msg.item);
+      break;
+    case 'chat-delta':
+      chatPane(msg.id)?.delta(msg.itemId, msg.text);
+      break;
+    case 'chat-update':
+      chatPane(msg.id)?.patch(msg.itemId, msg.patch);
       break;
     case 'scrollback': {
       const pane = panes.get(msg.id);

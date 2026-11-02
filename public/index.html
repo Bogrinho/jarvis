@@ -6,9 +6,10 @@
   <meta name="jarvis-token" content="">
   <title>Jarvis</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Jura:wght@300;400;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Jura:wght@300;400;600&family=JetBrains+Mono:wght@400;500;700&family=Commissioner:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/chat.css">
 </head>
 <body>
 <div class="app">
@@ -67,21 +68,26 @@
         <button type="submit" aria-label="Αποστολή">↵</button>
       </form>
       <p class="msg" id="askMsg" role="status" hidden></p>
-      <button class="browse" id="openTerms" type="button">Open terminals</button>
+      <button class="browse" id="openTerms" type="button">Open sessions</button>
     </div>
   </section>
 
   <footer class="dock" id="dock">
     <div class="bar">
-      <button id="tt" type="button">⌘ Terminals <span class="cnt" id="ttCount">0 open ^</span></button>
+      <button id="tt" type="button">⌘ Sessions <span class="cnt" id="ttCount">0 open ^</span></button>
       <div class="tabs" id="tabs"></div>
       <span class="sp"></span>
       <span class="pill">Shared with Obsidian</span>
       <div class="newwrap">
-        <button class="pill solid" id="newTerm" type="button" aria-haspopup="true" aria-expanded="false">+ New terminal</button>
+        <button class="pill solid" id="newTerm" type="button" aria-haspopup="true" aria-expanded="false">+ Νέα συζήτηση</button>
         <div class="picker" id="picker" hidden>
           <p class="pk-h" id="pickerH">Φάκελος</p>
+          <div class="pk-mode" id="pickerMode" role="group" aria-label="Τρόπος">
+            <button type="button" data-mode="chat" aria-pressed="true">Chat</button><button type="button" data-mode="terminal" aria-pressed="false">Terminal</button>
+          </div>
+          <p class="pk-sub">Φάκελος</p>
           <div id="pickerList"></div>
+          <div id="pickerHistory"></div>
           <p class="msg" id="pickerMsg" role="status" hidden></p>
         </div>
       </div>
