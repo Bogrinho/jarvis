@@ -279,7 +279,10 @@ class ClaudeAdapter extends EventEmitter {
       case 'system':
         if (msg.subtype === 'init') {
           // A resume can continue under a new id (e.g. a copy of a running session).
-          if (isUuid(msg.session_id)) this.#sessionId = msg.session_id;
+          if (isUuid(msg.session_id) && msg.session_id !== this.#sessionId) {
+            this.#sessionId = msg.session_id;
+            this.emit('external-id', msg.session_id);
+          }
           this.#sessionStarted = true;
           if (this.#state === 'idle') this.#setState(this.#approvals.size ? 'waiting' : 'working');
         }

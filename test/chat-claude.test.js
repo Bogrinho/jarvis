@@ -430,3 +430,30 @@ test('start with resumeId emits history items from the session file', async (t) 
   await a.start({ resumeId: SID });
   assert.deepEqual(items(ev).map(i => i.text), ['old q', 'old a']);
 });
+
+test('a resume that forks to a new session id emits external-id', async (t) => {
+  const FORK = '99999999-8888-4777-8666-555555555555';
+  process.env.FAKE_FORK_SID = FORK;
+  t.after(() => { delete process.env.FAKE_FORK_SID; });
+  const { a } = mk({ env: { ...process.env, FAKE_FORK_SID: FORK } });
+  t.after(() => a.close());
+  const ids = [];
+  a.on('external-id', (id) => ids.push(id));
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' }, resumeId: SID });
+  a.send('hello');
+  await waitFor(() => idleCount(ev) === 1);
+  assert.deepEqual(ids, [FORK]);
+});
+
+test('no external-id when the session id is unchanged', async (t) => {
+  const { a } = mk();
+  t.after(() => a.close());
+  const ids = [];
+  a.on('external-id', (id) => ids.push(id));
+  const ev = record(a);
+  await a.start({ conv: { id: 'c' } });
+  a.send('hello');
+  await waitFor(() => idleCount(ev) === 1);
+  assert.deepEqual(ids, []);
+});

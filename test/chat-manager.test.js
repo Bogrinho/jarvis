@@ -279,3 +279,15 @@ test('adapter approval-expired expires only that approval', async () => {
   assert.deepEqual(adapters[0].answers, [['t2', 'approve']]);
   adapters[0].emit('approval-expired', 'unknown'); // ignored
 });
+
+test('adapter external-id event updates externalId and the persisted index', async () => {
+  const { mgr, adapters, mk, indexFile } = await setup();
+  const info = await mk();
+  adapters[0].emit('external-id', 'forked-1');
+  assert.equal(mgr.get(info.id).info.externalId, 'forked-1');
+  await mgr.flush();
+  const idx = JSON.parse(await readFile(indexFile, 'utf8'));
+  assert.equal(idx.find(e => e.id === info.id).externalId, 'forked-1');
+  adapters[0].emit('external-id', 42); // non-string ignored
+  assert.equal(mgr.get(info.id).info.externalId, 'forked-1');
+});

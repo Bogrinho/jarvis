@@ -215,6 +215,14 @@ export class ChatManager extends EventEmitter {
       Object.assign(item, safe);
       this.emit('update', id, itemId, safe);
     });
+    // A resume can continue under a new CLI session id; keep the stored one current.
+    adapter.on('external-id', externalId => {
+      if (typeof externalId !== 'string' || !externalId || c.info.externalId === externalId) return;
+      c.info.externalId = externalId;
+      this.#touch(c);
+      this.#scheduleWrite();
+      this.emit('conv', { ...c.info });
+    });
     adapter.on('state', state => this.#setState(c, state));
     adapter.on('approval', ({ token, title, detail, command }) => {
       const approvalId = randomUUID();
