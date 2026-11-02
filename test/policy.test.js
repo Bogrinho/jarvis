@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.js';
 import { allowedAccounts, resolveTarget, buildLaunch, PolicyError } from '../src/policy.js';
 
-const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'jarvis.config.json');
+const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'jarvis.config.json');
 
 function makeConfig() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-policy-'));

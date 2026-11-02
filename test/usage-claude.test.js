@@ -48,7 +48,7 @@ test('no projects folder returns null', async () => {
 });
 
 test('collectUsage keeps going when one account throws', async () => {
-  const config = loadConfig(path.join(here, '..', 'jarvis.config.json'));
+  const config = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
   const pct = { kind: 'percent', fiveHour: { pct: 1, resetsAt: NOW }, weekly: { pct: 2, resetsAt: NOW }, plan: null, updatedAt: NOW };
   const r = await collectUsage(config, {
     readCodexUsage: async (home) => {
@@ -65,7 +65,7 @@ test('collectUsage keeps going when one account throws', async () => {
 });
 
 test('gemini enabled reports no local usage data', async () => {
-  const config = loadConfig(path.join(here, '..', 'jarvis.config.json'));
+  const config = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
   config.accounts.gemini.enabled = true;
   const r = await collectUsage(config, { readCodexUsage: async () => null, readClaudeUsage: async () => null });
   assert.equal(r.gemini.reason, 'no local usage data');

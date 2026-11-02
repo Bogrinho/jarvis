@@ -1,0 +1,49 @@
+{
+  "port": 4777,
+  "accounts": {
+    "work": {
+      "label": "Codex Work",
+      "cli": "codex",
+      "side": "work",
+      "mode": "cautious",
+      "home": "C:\\Users\\stath\\Documents\\Codex\\2026-05-17\\act-as-my-coding-agent-we",
+      "env": { "CODEX_HOME": "C:\\Users\\stath\\.codex" },
+      "enabled": true
+    },
+    "mine": {
+      "label": "Codex Personal",
+      "cli": "codex",
+      "side": "personal",
+      "mode": "edit-in-project",
+      "home": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github",
+      "env": { "CODEX_HOME": "C:\\Users\\stath\\.codex-personal" },
+      "enabled": true
+    },
+    "claude": {
+      "label": "Claude",
+      "cli": "claude",
+      "side": "personal",
+      "mode": "edit-in-project",
+      "home": ".",
+      "env": {},
+      "enabled": true
+    },
+    "gemini": {
+      "label": "Gemini",
+      "cli": "gemini",
+      "side": "personal",
+      "mode": "edit-in-project",
+      "home": "vault",
+      "env": {},
+      "enabled": false
+    }
+  },
+  "projects": [],
+  "quickCommands": [
+    { "id": "plan-today", "label": "Plan Today", "prompt": "Read today.md and plan my day: order the tasks and suggest time blocks." },
+    { "id": "daily-brief", "label": "Daily Brief", "prompt": "Read today.md and give me a short daily brief of what matters most." },
+    { "id": "code-review", "label": "Code Review", "prompt": "Review the recent changes in this project and list issues; check today.md for related tasks." },
+    { "id": "new-project", "label": "New Project", "prompt": "Help me scaffold a new project; use today.md for context on current priorities." }
+  ],
+  "directivesFile": "vault/today.md"
+}

@@ -11,7 +11,7 @@ import { loadConfig } from '../src/config.js';
 import { JobManager } from '../src/jobs.js';
 import { createServer } from '../src/server.js';
 
-const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'jarvis.config.json');
+const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'jarvis.config.json');
 const TOKEN = 'a'.repeat(64);
 
 const freePort = () => new Promise((resolve, reject) => {

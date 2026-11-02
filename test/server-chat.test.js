@@ -13,7 +13,7 @@ import { JobManager } from '../src/jobs.js';
 import { createServer } from '../src/server.js';
 import { ChatManager } from '../src/chat/manager.js';
 
-const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'jarvis.config.json');
+const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'jarvis.config.json');
 const TOKEN = 'a'.repeat(64);
 const UUID = '11111111-2222-4333-8444-555555555555';
 
