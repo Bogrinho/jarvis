@@ -143,8 +143,8 @@ if (-not $settingsOk) {
 } elseif ($NonInteractive) {
     Write-Host "    Παραλείπεται (-NonInteractive). Η χρήση του Claude θα φαίνεται σε tokens."
 } else {
-    $ans = Read-Host "    Να προστεθεί ο βοηθός που δείχνει το % χρήσης του Claude; (Y/N)"
-    if ($ans -match '^[YyΝν]') {
+    $ans = Read-Host "    Να προστεθεί ο βοηθός που δείχνει το % χρήσης του Claude; (γράψτε ναι ή όχι)"
+    if ($ans.Trim() -match '^(?i)(y|yes|ναι|ναί)$') {
         try {
             $dir = Split-Path -Parent $settingsPath
             if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
@@ -170,8 +170,12 @@ Step 7 "Έλεγχος σύνδεσης Codex (λογαριασμός Work)"
 $codexWorkOk = $false
 if (Get-Command codex -ErrorAction SilentlyContinue) {
     try {
+        $savedHome = $env:CODEX_HOME
+        Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue
         $out = & codex login status 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0 -and $out -match 'Logged in') { $codexWorkOk = $true }
+        $code = $LASTEXITCODE
+        if ($null -ne $savedHome) { $env:CODEX_HOME = $savedHome }
+        if ($code -eq 0 -and $out -match 'Logged in') { $codexWorkOk = $true }
     } catch { }
 }
 if ($codexWorkOk) { Ok "Το Codex Work είναι ήδη συνδεδεμένο" }

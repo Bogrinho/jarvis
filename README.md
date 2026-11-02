@@ -38,18 +38,18 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 
 Ανοίξτε το αρχείο `jarvis.config.json` (με το Σημειωματάριο) και βάλτε τα έργα σας στη λίστα `projects`. Κάθε έργο έχει `name` (όνομα), `path` (φάκελος) και `side` (`work` ή `personal`).
 
-**Προσοχή:** στα Windows paths μέσα στο JSON κάθε `\` γράφεται διπλό, `\`.
+**Προσοχή:** στα Windows paths μέσα στο JSON κάθε `\` γράφεται ως `\\` (δύο φορές).
 
 ```json
 "projects": [
   {
     "name": "Εταιρικό site",
-    "path": "C:\Users\stath\Projects\company-site",
+    "path": "C:\\Users\\stath\\Projects\\company-site",
     "side": "work"
   },
   {
     "name": "Προσωπικό blog",
-    "path": "C:\Users\stath\Projects\my-blog",
+    "path": "C:\\Users\\stath\\Projects\\my-blog",
     "side": "personal"
   }
 ]
