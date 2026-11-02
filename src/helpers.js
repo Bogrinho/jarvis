@@ -9,6 +9,13 @@ import crypto from 'node:crypto';
 import { buildEnv } from './policy.js';
 
 export const HELPER_TIMEOUT_MS = 15 * 60 * 1000;
+
+// Headless agy auto-denies shell commands and then stops with no answer, so steer it to
+// its own file tools up front.
+const GEMINI_PREAMBLE =
+  'You are running headless: shell commands (run_command) are not allowed and will be denied. ' +
+  'Use your file tools instead: list_dir, find_by_name, grep_search, view_file (and edit tools only if the task asks for changes). ' +
+  'Always finish with a written answer.\n\n';
 const MAX_OUTPUT = 200 * 1024;
 
 const norm = (p) => path.resolve(p).toLowerCase();
@@ -70,7 +77,7 @@ export function runHelper({ config, kind, task, cwd, spawn = cp.spawn, timeoutMs
     } catch (e) { return reject(e); }
     const outFile = path.join(tmpDir, `jarvis-helper-${crypto.randomBytes(6).toString('hex')}.txt`);
     const l = helperLaunch(account, cwd, outFile);
-    const args = l.promptArg ? [...l.args, task] : l.args;
+    const args = l.promptArg ? [...l.args, (kind === 'gemini' ? GEMINI_PREAMBLE : '') + task] : l.args;
     let child;
     try {
       child = spawn(l.file, args, { cwd, env: l.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -97,8 +104,8 @@ export function runHelper({ config, kind, task, cwd, spawn = cp.spawn, timeoutMs
       try { fs.rmSync(outFile, { force: true }); } catch { /* ignore */ }
       if (!answer.trim()) answer = out;
       answer = answer.trim();
-      if (code !== 0 && !answer) return reject(new Error(`Ο βοηθός σταμάτησε με σφάλμα (κωδικός ${code}): ${err.trim().slice(-800)}`));
-      resolve({ account: account.label, answer: answer || '(καμία απάντηση)', exitCode: code });
+      if (!answer) return reject(new Error(`Ο βοηθός δεν έδωσε απάντηση (κωδικός ${code}): ${err.trim().slice(-800) || 'χωρίς μήνυμα'}`));
+      resolve({ account: account.label, answer, exitCode: code });
     });
     if (l.stdin) child.stdin?.end(task); else child.stdin?.end();
   });

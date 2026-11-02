@@ -74,7 +74,8 @@ test('gemini helper runs agy -p with accept-edits in the folder', async () => {
   const r = await runHelper({ config: c, kind: 'gemini', task: 'γράψε ένα README', cwd: os.tmpdir(), spawn });
   assert.equal(r.answer, 'hello from gemini');
   assert.equal(calls[0].file, 'agy');
-  assert.deepEqual(calls[0].args, ['--mode', 'accept-edits', '--output-format', 'text', '-p', 'γράψε ένα README']);
+  assert.deepEqual(calls[0].args.slice(0, -1), ['--mode', 'accept-edits', '--output-format', 'text', '-p']);
+  assert.ok(calls[0].args.at(-1).endsWith('γράψε ένα README'));
   assert.ok(!calls[0].args.includes('--dangerously-skip-permissions'));
 });
 
@@ -95,7 +96,7 @@ test('a helper that hangs is stopped after the timeout; a failing one reports it
   const hang = fakeSpawn({ never: true });
   await assert.rejects(runHelper({ config: c, kind: 'codex', task: 'x', cwd: os.tmpdir(), spawn: hang.spawn, timeoutMs: 50 }), /σταμάτησε/);
   const fail = fakeSpawn({ answer: '', code: 1 });
-  await assert.rejects(runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn: fail.spawn }), /σφάλμα/);
+  await assert.rejects(runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn: fail.spawn }), /δεν έδωσε απάντηση/);
 });
 
 test('cautious accounts run read-only / ask-everything', () => {
@@ -104,4 +105,27 @@ test('cautious accounts run read-only / ask-everything', () => {
   assert.ok(l.args.includes('read-only'));
   const g = helperLaunch({ ...c.accounts.gemini, mode: 'cautious' }, os.tmpdir(), 'o.txt');
   assert.ok(!g.args.includes('--mode'));
+});
+
+test('gemini is told to use file tools, not shell commands', async () => {
+  const c = config();
+  const { spawn, calls } = fakeSpawn({ answer: 'ok' });
+  await runHelper({ config: c, kind: 'gemini', task: 'review x', cwd: os.tmpdir(), spawn });
+  const prompt = calls[0].args.at(-1);
+  assert.match(prompt, /list_dir/);
+  assert.match(prompt, /review x$/);
+});
+
+test('an empty answer reports what the helper said on stderr', async () => {
+  const c = config();
+  const spawn = (file, args) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new Writable({ write(_c, _e, cb) { cb(); } });
+    child.kill = () => {};
+    setTimeout(() => { child.stderr.write('no output produced — a tool required the "command" permission'); child.emit('close', 0); }, 20);
+    return child;
+  };
+  await assert.rejects(runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn }), /command" permission/);
 });
