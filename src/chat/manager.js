@@ -87,6 +87,20 @@ export class ChatManager extends EventEmitter {
     return { info: { ...c.info }, items: c.items.map(i => ({ ...i })) };
   }
 
+  // A live conversation of this account already attached to this CLI session, if any.
+  findByExternal(accountId, externalId) {
+    for (const c of this.#convs.values()) {
+      if (c.info.accountId === accountId && c.info.externalId === externalId) return { ...c.info };
+    }
+    return null;
+  }
+
+  // Surface a problem in the transcript (e.g. the first message could not be sent).
+  reportError(id, text) {
+    const c = this.#need(id);
+    this.#addItem(c, { id: randomUUID(), kind: 'error', text });
+  }
+
   send(id, text) {
     const c = this.#need(id);
     if (c.exited) throw new ChatError('CHAT_EXITED', 'Conversation has ended');

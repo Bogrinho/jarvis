@@ -343,6 +343,8 @@ export function createServer({
         }
         throw new HttpError(404, 'NO_SUCH_HISTORY');
       }
+      const live = chats.findByExternal(accountId, resumeId);
+      if (live) return { existing: true, info: live };
       title ??= mine.title;
     }
     if (!title) {
@@ -353,9 +355,12 @@ export function createServer({
       accountId, account, cwd: target.cwd, side: target.side, title, resumeId: resumeId || undefined,
     });
     if (firstPrompt) {
-      try { chats.send(info.id, firstPrompt); } catch (e) { d.log(`chat first message failed: ${e.message}`); }
+      try { chats.send(info.id, firstPrompt); } catch (e) {
+        d.log(`chat first message failed: ${e.message}`);
+        try { chats.reportError(info.id, `The first message could not be sent: ${e.message}`); } catch { /* chat gone */ }
+      }
     }
-    return chats.get(info.id).info;
+    return { existing: false, info: chats.get(info.id).info };
   }
 
   async function handleChatApi(req, res, pathname) {
@@ -370,7 +375,10 @@ export function createServer({
       return send(res, 200, await historyFor(account, target.cwd));
     }
     if (pathname === '/api/chats' && req.method === 'GET') return send(res, 200, chats.list());
-    if (pathname === '/api/chats' && req.method === 'POST') return send(res, 201, await startChat(await readJson(req)));
+    if (pathname === '/api/chats' && req.method === 'POST') {
+      const { existing, info } = await startChat(await readJson(req));
+      return send(res, existing ? 200 : 201, info);
+    }
 
     const m = /^\/api\/chats\/([^/]+)(?:\/(messages|interrupt|approvals\/([^/]+)))?$/.exec(pathname);
     if (!m || !UUID_RE.test(m[1])) return send(res, 404, { error: 'NOT_FOUND' });
@@ -384,7 +392,7 @@ export function createServer({
       return send(res, 200, { ok: true });
     }
     if (action === 'interrupt' && req.method === 'POST') {
-      await readJson(req).catch(() => null);
+      req.resume(); // interrupt needs no body
       chats.interrupt(id);
       return send(res, 200, { ok: true });
     }

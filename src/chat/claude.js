@@ -447,7 +447,7 @@ export function claudeProjectSlug(cwd) {
 }
 
 function cleanCwd(cwd) {
-  const s = String(cwd ?? '').replace(/^\\\\\?\\/, '');
+  const s = String(cwd ?? '').normalize('NFC').replace(/^\\\\\?\\/, '');
   return /^[a-zA-Z]:[\\/]?$/.test(s) ? s : s.replace(/[\\/]+$/, '');
 }
 
@@ -465,6 +465,28 @@ async function projectDir(claudeHome, cwd) {
   } catch {
     return null;
   }
+}
+
+const normCwd = (p) => String(p ?? '').normalize('NFC').replace(/^\\\\\?\\/, '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+
+// The cwd Claude recorded inside a session file. The project folder name is a lossy
+// slug (non-ASCII folders collide), so this is what proves a session belongs to a folder.
+async function recordedCwd(file) {
+  const stream = createReadStream(file, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let n = 0;
+  try {
+    for await (const line of rl) {
+      if (++n > 200) break;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (typeof msg?.cwd === 'string' && msg.cwd) return msg.cwd;
+    }
+  } catch { /* unreadable */ } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return null;
 }
 
 async function firstUserText(file) {
@@ -502,6 +524,8 @@ export async function listClaudeSessions({ claudeHome, cwd, limit = 30 }) {
   const out = [];
   for (const f of files) {
     if (out.length >= limit) break;
+    const rec = await recordedCwd(f.file);
+    if (rec === null || normCwd(rec) !== normCwd(cleanCwd(cwd))) continue;
     const text = (await firstUserText(f.file)).replace(/\s+/g, ' ').trim();
     if (!text) continue; // nothing the user said: not a conversation worth continuing
     out.push({ externalId: f.id, title: [...text].slice(0, 60).join(''), updatedAt: f.mtime.toISOString() });

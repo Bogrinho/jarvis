@@ -336,7 +336,7 @@ test('project slug matches Claude Code naming (non-alphanumerics → "-", long p
 });
 
 const line = o => JSON.stringify(o) + '\n';
-const userLine = (content, extra = {}) => line({ type: 'user', message: { role: 'user', content }, uuid: 'u', ...extra });
+const userLine = (content, extra = {}) => line({ type: 'user', message: { role: 'user', content }, uuid: 'u', cwd: 'C:\\Proj\\Ένα', ...extra });
 const asstLine = content => line({ type: 'assistant', message: { role: 'assistant', content }, uuid: 'a' });
 
 async function mkHome(t) {
@@ -364,7 +364,7 @@ test('listClaudeSessions reads only the cwd\'s project folder', async (t) => {
   await writeFile(join(dir, `${s2}.jsonl`), userLine('short one') + asstLine([{ type: 'text', text: 'ok' }]));
   await writeFile(join(dir, 'not-a-session.jsonl'), userLine('nope'));
   await mkdir(join(dir, s3)); // per-session folder (subagents, tool results)
-  await writeFile(join(other, `${s3}.jsonl`), userLine('other project'));
+  await writeFile(join(other, `${s3}.jsonl`), userLine('other project', { cwd: 'C:\\Proj\\Other' }));
   const old = new Date('2026-01-01T00:00:00Z');
   await utimes(join(dir, `${s1}.jsonl`), old, old);
 
@@ -456,4 +456,23 @@ test('no external-id when the session id is unchanged', async (t) => {
   a.send('hello');
   await waitFor(() => idleCount(ev) === 1);
   assert.deepEqual(ids, []);
+});
+
+test('sessions whose recorded cwd differs are not listed even when the project slug collides', async (t) => {
+  const home = await mkHome(t);
+  const a = 'C:\\Proj\\Ένα';
+  const b = 'C:\\Proj\\Δύο'; // same slug as a: every non-ASCII unit becomes '-'
+  assert.equal(claudeProjectSlug(a), claudeProjectSlug(b));
+  const dir = join(home, 'projects', claudeProjectSlug(a));
+  await mkdir(dir, { recursive: true });
+  const sa = 'cccccccc-0000-4000-8000-000000000001';
+  const sb = 'cccccccc-0000-4000-8000-000000000002';
+  const sn = 'cccccccc-0000-4000-8000-000000000003';
+  await writeFile(join(dir, `${sa}.jsonl`), line({ type: 'queue-operation' }) + userLine('in a', { cwd: a }));
+  await writeFile(join(dir, `${sb}.jsonl`), userLine('in b', { cwd: b }));
+  await writeFile(join(dir, `${sn}.jsonl`), line({ type: 'user', message: { role: 'user', content: 'no cwd' } }));
+  assert.deepEqual((await listClaudeSessions({ claudeHome: home, cwd: a })).map(s => s.externalId), [sa]);
+  assert.deepEqual((await listClaudeSessions({ claudeHome: home, cwd: b })).map(s => s.externalId), [sb]);
+  // case, slash style and unicode normalization do not matter
+  assert.deepEqual((await listClaudeSessions({ claudeHome: home, cwd: 'c:/proj/ένα'.normalize('NFD') })).map(s => s.externalId), [sa]);
 });

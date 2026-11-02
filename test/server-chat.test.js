@@ -245,6 +245,30 @@ test('history lists only externalId/title/updatedAt; resume must come from that 
   assert.equal(typed.json.error, 'NO_SUCH_HISTORY');
   assert.equal((await post(ctx, { accountId: 'mine', projectPath: ctx.personalPath, resumeId: 7 })).status, 400);
   assert.equal(ctx.adapters.length, 1);
+
+  // the same thread is already open: return the live chat, no second adapter
+  const again = await post(ctx, { accountId: 'mine', projectPath: ctx.personalPath, resumeId: 'thread-p' });
+  assert.equal(again.status, 200);
+  assert.equal(again.json.id, ok.json.id);
+  assert.equal(ctx.adapters.length, 1);
+});
+
+test('first prompt failure is visible in the transcript', async () => {
+  const ctx = await setup();
+  const orig = ctx.chats.send.bind(ctx.chats);
+  ctx.chats.send = () => { throw new Error('boom'); };
+  const r = await post(ctx, { accountId: 'mine', useHome: true, prompt: 'hi' });
+  ctx.chats.send = orig;
+  assert.equal(r.status, 201);
+  const { items } = ctx.chats.get(r.json.id);
+  assert.ok(items.some((i) => i.kind === 'error' && /first message/i.test(i.text)));
+});
+
+test('interrupt ignores the request body entirely', async () => {
+  const ctx = await setup();
+  const id = (await post(ctx, { accountId: 'claude', useHome: true })).json.id;
+  const r = await request(ctx, { method: 'POST', path: `/api/chats/${id}/interrupt` });
+  assert.equal(r.status, 200);
 });
 
 test('resume of a thread whose cwd is on the other side is refused', async () => {

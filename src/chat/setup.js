@@ -3,12 +3,13 @@ import path from 'node:path';
 import { buildEnv } from '../policy.js';
 import { ChatManager } from './manager.js';
 import { CodexAppServer, createCodexAdapter, listCodexThreads } from './codex.js';
-import { createClaudeAdapter, listClaudeSessions } from './claude.js';
+import { createClaudeAdapter as realClaudeAdapter, listClaudeSessions } from './claude.js';
 
 // Real chat wiring: one codex app-server per Codex account (lazy, own CODEX_HOME env),
 // one claude process per conversation, history listers for both.
 export function createChat({ config, indexFile, log = () => {}, deps = {} }) {
   const makeServer = deps.CodexAppServer ?? ((o) => new CodexAppServer(o));
+  const makeClaude = deps.createClaudeAdapter ?? realClaudeAdapter;
   const servers = new Map(); // accountId -> CodexAppServer
   const codexServer = (account) => {
     let s = servers.get(account.id);
@@ -24,7 +25,7 @@ export function createChat({ config, indexFile, log = () => {}, deps = {} }) {
     indexFile,
     adapters: {
       codex: (account, cwd) => createCodexAdapter({ server: codexServer(account), account, cwd }),
-      claude: (account, cwd) => createClaudeAdapter({ account, cwd, env: buildEnv(account.env ?? {}), claudeHome: claudeHome(account) }),
+      claude: (account, cwd) => makeClaude({ account, cwd, env: buildEnv(account.env ?? {}), claudeHome: claudeHome(account) }),
     },
   });
 
