@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-11-01T10:30:00.000Z","message":{"role":"user","content":"hi"}}
+{"type":"assistant","timestamp":"2026-11-01T11:00:00.000Z","message":{"role":"assistant","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":200,"cache_read_input_tokens":5000}}}
+{"type":"assistant","timestamp":"2026-10-30T12:00:00.000Z","message":{"role":"assistant","usage":{"output_tokens":1000,"cache_read_input_tokens":7777}}}
+{"type":"assistant","timestamp":"2026-10-23T12:00:00.000Z","message":{"role":"assistant","usage":{"output_tokens":9999}}}
+{truncated
