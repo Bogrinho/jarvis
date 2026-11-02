@@ -24,7 +24,7 @@
       "cli": "claude",
       "side": "personal",
       "mode": "edit-in-project",
-      "home": "vault",
+      "home": ".",
       "env": {},
       "enabled": true
     },
