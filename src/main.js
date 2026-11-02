@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { JobManager } from './jobs.js';
 import { createServer } from './server.js';
+import { createChat } from './chat/setup.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noOpen = process.argv.includes('--no-open');
@@ -47,12 +48,14 @@ async function pingExisting() {
 // Token lives only in memory; the served index.html carries it to the HUD.
 const token = crypto.randomBytes(32).toString('hex');
 const jobs = new JobManager();
+const chat = createChat({ config, indexFile: path.join(dataDir, 'chats.json'), log });
 let shuttingDown = false;
 async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   log('shutting down');
   try { await jobs.killAll(); } catch { /* best effort */ }
+  await chat.closeAll();
   // node-pty tears ConPTY down via short-lived helper processes; calling process.exit while one
   // is still running hangs node on Windows (port stays bound). Wait for them, but not forever.
   const deadline = Date.now() + 3000;
@@ -62,7 +65,7 @@ async function shutdown(code = 0) {
   process.exit(code);
 }
 
-const server = createServer({ config, jobs, token, onShutdown: () => shutdown(0), deps: { log } });
+const server = createServer({ config, jobs, token, onShutdown: () => shutdown(0), chats: chat.manager, chatHistory: chat.history, deps: { log } });
 
 process.on('uncaughtException', (e) => log(`uncaught: ${e?.stack ?? e}`));
 process.on('unhandledRejection', (e) => log(`unhandled rejection: ${e?.stack ?? e}`));

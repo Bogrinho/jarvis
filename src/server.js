@@ -13,6 +13,7 @@ import {
   perDayRate as defaultPerDayRate,
 } from './usage/history.js';
 import { readDirectives as defaultReadDirectives } from './directives.js';
+import { ChatError } from './chat/model.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -33,6 +34,12 @@ const TYPES = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.map': 'application/json; charset=utf-8',
+};
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CHAT_CLIS = new Set(['codex', 'claude']);
+const CHAT_ERRORS = {
+  NO_SUCH_CHAT: 404, NO_SUCH_APPROVAL: 404, BAD_DECISION: 400,
+  CHAT_UNSUPPORTED: 400, START_FAILED: 502, CHAT_EXITED: 409,
 };
 const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
@@ -134,6 +141,7 @@ function staticFile(rawPath) {
 
 export function createServer({
   config, jobs, token, usageIntervalMs = 60000, onShutdown = () => process.exit(0), deps = {},
+  chats = null, chatHistory = null,
 }) {
   if (typeof token !== 'string' || token.length < 16) throw new Error('createServer: token required');
   const d = {
@@ -275,6 +283,120 @@ export function createServer({
     return info;
   }
 
+  // ---------- chat ----------
+  const optStr = (v) => v === undefined || v === null || typeof v === 'string';
+
+  // Past conversations of `account` in `cwd`, reduced to what the client may see.
+  async function historyFor(account, cwd) {
+    if (typeof chatHistory !== 'function') return [];
+    let list;
+    try { list = await chatHistory({ account, cwd }); } catch (e) {
+      d.log(`chat history failed: ${e.message}`);
+      throw new HttpError(502, 'HISTORY_UNAVAILABLE');
+    }
+    return (Array.isArray(list) ? list : []).map((h) => ({
+      externalId: h.externalId, title: h.title, updatedAt: h.updatedAt ?? null,
+    }));
+  }
+
+  function chatAccount(accountId) {
+    const account = config.accounts[accountId];
+    if (!CHAT_CLIS.has(account.cli)) throw new ChatError('CHAT_UNSUPPORTED', `no chat for ${account.cli}`);
+    return account;
+  }
+
+  async function startChat(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'BAD_REQUEST');
+    const { accountId, projectPath, useHome, prompt, quickCommandId, resumeId } = body;
+    if (typeof accountId !== 'string') throw new HttpError(400, 'BAD_REQUEST');
+    if (!optStr(projectPath) || !optStr(prompt) || !optStr(quickCommandId)) throw new HttpError(400, 'BAD_REQUEST');
+    if (useHome !== undefined && typeof useHome !== 'boolean') throw new HttpError(400, 'BAD_REQUEST');
+    if (resumeId !== undefined && resumeId !== null && (typeof resumeId !== 'string' || !resumeId || resumeId.length > 200)) {
+      throw new HttpError(400, 'BAD_REQUEST');
+    }
+
+    let target;
+    let firstPrompt = prompt || undefined;
+    let title;
+    if (quickCommandId) {
+      const cmd = config.quickCommands.find((q) => q.id === quickCommandId);
+      if (!cmd) throw new HttpError(400, 'UNKNOWN_COMMAND');
+      target = resolveTarget(config, { accountId, useHome: true });
+      firstPrompt = cmd.prompt;
+      title = cmd.label;
+    } else {
+      target = resolveTarget(config, { accountId, projectPath: projectPath || undefined, useHome: useHome === true });
+    }
+    const account = chatAccount(accountId);
+
+    if (resumeId) {
+      // Only ids the history list offers for this account + resolved folder may be resumed.
+      const mine = (await historyFor(account, target.cwd)).find((h) => h.externalId === resumeId);
+      if (!mine) {
+        const otherSide = [
+          ...config.projects.filter((p) => p.side !== target.side).map((p) => p.path),
+          ...Object.values(config.accounts).filter((a) => a.side !== target.side && a.home).map((a) => a.home),
+        ];
+        for (const cwd of otherSide) {
+          const found = (await historyFor(account, cwd).catch(() => [])).some((h) => h.externalId === resumeId);
+          if (found) throw new HttpError(403, 'SIDE_MISMATCH');
+        }
+        throw new HttpError(404, 'NO_SUCH_HISTORY');
+      }
+      title ??= mine.title;
+    }
+    if (!title) {
+      const project = config.projects.find((p) => path.resolve(p.path).toLowerCase() === path.resolve(target.cwd).toLowerCase());
+      title = firstPrompt ? firstPrompt.slice(0, 60) : `${account.label} · ${project ? project.name : 'home'}`;
+    }
+    const info = await chats.create({
+      accountId, account, cwd: target.cwd, side: target.side, title, resumeId: resumeId || undefined,
+    });
+    if (firstPrompt) {
+      try { chats.send(info.id, firstPrompt); } catch (e) { d.log(`chat first message failed: ${e.message}`); }
+    }
+    return chats.get(info.id).info;
+  }
+
+  async function handleChatApi(req, res, pathname) {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (pathname === '/api/chat-history' && req.method === 'GET') {
+      const accountId = url.searchParams.get('accountId');
+      if (!accountId) throw new HttpError(400, 'BAD_REQUEST');
+      const target = resolveTarget(config, {
+        accountId, projectPath: url.searchParams.get('projectPath') || undefined, useHome: url.searchParams.get('useHome') === '1',
+      });
+      const account = chatAccount(accountId);
+      return send(res, 200, await historyFor(account, target.cwd));
+    }
+    if (pathname === '/api/chats' && req.method === 'GET') return send(res, 200, chats.list());
+    if (pathname === '/api/chats' && req.method === 'POST') return send(res, 201, await startChat(await readJson(req)));
+
+    const m = /^\/api\/chats\/([^/]+)(?:\/(messages|interrupt|approvals\/([^/]+)))?$/.exec(pathname);
+    if (!m || !UUID_RE.test(m[1])) return send(res, 404, { error: 'NOT_FOUND' });
+    const [, id, action, approvalId] = m;
+    if (!action && req.method === 'GET') return send(res, 200, chats.get(id));
+    if (!action && req.method === 'DELETE') { chats.close(id); return send(res, 200, { ok: true }); }
+    if (action === 'messages' && req.method === 'POST') {
+      const body = await readJson(req);
+      if (!body || typeof body.text !== 'string' || body.text.trim() === '') throw new HttpError(400, 'BAD_REQUEST');
+      chats.send(id, body.text);
+      return send(res, 200, { ok: true });
+    }
+    if (action === 'interrupt' && req.method === 'POST') {
+      await readJson(req).catch(() => null);
+      chats.interrupt(id);
+      return send(res, 200, { ok: true });
+    }
+    if (approvalId !== undefined && req.method === 'POST') {
+      if (!UUID_RE.test(approvalId)) throw new ChatError('NO_SUCH_APPROVAL');
+      const body = await readJson(req);
+      chats.answer(id, approvalId, body?.decision);
+      return send(res, 200, { ok: true });
+    }
+    return send(res, 404, { error: 'NOT_FOUND' });
+  }
+
   async function handleApi(req, res, pathname) {
     if (pathname === '/api/ping' && req.method === 'GET') return send(res, 200, 'jarvis');
     if (!tokenMatches(token, req.headers['x-jarvis-token'])) return send(res, 403, { error: 'FORBIDDEN' });
@@ -284,8 +406,12 @@ export function createServer({
       const body = await readJson(req);
       return send(res, 201, startJob(body));
     }
+    if (chats && (pathname === '/api/chat-history' || pathname === '/api/chats' || pathname.startsWith('/api/chats/'))) {
+      return handleChatApi(req, res, pathname);
+    }
     if (pathname === '/api/shutdown' && req.method === 'POST') {
       await jobs.killAll();
+      try { await chats?.closeAll(); } catch (e) { d.log(`chat shutdown: ${e.message}`); }
       res.once('finish', () => setImmediate(() => onShutdown()));
       return send(res, 200, { ok: true });
     }
@@ -320,6 +446,7 @@ export function createServer({
     } catch (e) {
       if (res.headersSent) return res.destroy();
       if (e instanceof PolicyError) return send(res, 403, { error: e.code });
+      if (e instanceof ChatError) return send(res, CHAT_ERRORS[e.code] ?? 500, { error: e.code });
       if (e instanceof HttpError) {
         if (e.code === 'BODY_TOO_LARGE') res.setHeader('connection', 'close');
         return send(res, e.status, { error: e.code });
@@ -332,6 +459,7 @@ export function createServer({
   // ---------- WebSocket ----------
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
   const attached = new Map(); // ws -> Set<jobId>
+  const chatAttached = new Map(); // ws -> Set<chatId>
 
   server.on('upgrade', (req, socket, head) => {
     const reject = (status) => {
@@ -362,13 +490,24 @@ export function createServer({
 
   wss.on('connection', (ws) => {
     attached.set(ws, new Set());
-    ws.on('close', () => attached.delete(ws));
+    chatAttached.set(ws, new Set());
+    ws.on('close', () => { attached.delete(ws); chatAttached.delete(ws); });
     ws.on('error', () => {});
     ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
       let msg;
       try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
-      if (!msg || typeof msg !== 'object' || !known(msg.id)) return;
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'chat-attach') {
+        if (!chats || typeof msg.id !== 'string' || !UUID_RE.test(msg.id)) return;
+        try {
+          const { info, items } = chats.get(msg.id);
+          chatAttached.get(ws)?.add(msg.id);
+          sendWs(ws, { type: 'chat-snapshot', id: msg.id, info, items });
+        } catch { /* unknown conversation: no reply */ }
+        return;
+      }
+      if (!known(msg.id)) return;
       try {
         switch (msg.type) {
           case 'attach': {
@@ -395,7 +534,23 @@ export function createServer({
     });
     sendWs(ws, { type: 'jobs', list: jobs.list() });
     sendWs(ws, { type: 'usage', usage });
+    if (chats) sendWs(ws, { type: 'chats', list: chats.list() });
   });
+
+  const toChat = (id, msg) => {
+    for (const [ws, ids] of chatAttached) if (ids.has(id)) sendWs(ws, msg);
+  };
+  const chatListeners = chats ? {
+    conv: () => broadcast({ type: 'chats', list: chats.list() }),
+    removed: (id) => {
+      for (const ids of chatAttached.values()) ids.delete(id);
+      broadcast({ type: 'chats', list: chats.list() });
+    },
+    item: (id, item) => toChat(id, { type: 'chat-item', id, item }),
+    delta: (id, itemId, text) => toChat(id, { type: 'chat-delta', id, itemId, text }),
+    update: (id, itemId, patch) => toChat(id, { type: 'chat-update', id, itemId, patch }),
+  } : {};
+  for (const [ev, fn] of Object.entries(chatListeners)) chats.on(ev, fn);
 
   const onData = (id, data) => {
     for (const [ws, ids] of attached) if (ids.has(id)) sendWs(ws, { type: 'data', id, data });
@@ -438,6 +593,7 @@ export function createServer({
       jobs.off('data', onData);
       jobs.off('state', onJobChange);
       jobs.off('exit', onJobChange);
+      for (const [ev, fn] of Object.entries(chatListeners)) chats.off(ev, fn);
       for (const ws of wss.clients) ws.terminate();
       wss.close();
       return new Promise((resolve) => {
