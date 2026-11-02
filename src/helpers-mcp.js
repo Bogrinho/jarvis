@@ -30,6 +30,15 @@ const TOOLS = [
   },
 ];
 
+// Team rules for the leader, sent once at startup (works in any folder, with or without CLAUDE.md).
+const INSTRUCTIONS =
+  'You are the leader of a small team. Claude Pro has the tightest limits, so plan, decide and verify ' +
+  'yourself, and hand heavy work to the helpers: ask_codex for writing/changing code, running tests, ' +
+  'fixing bugs and code review; ask_gemini for second opinions, research, reading long files and writing text ' +
+  '(Gemini cannot run commands). Helpers do not see this conversation: give each a self-contained task with ' +
+  'goal, files, what "done" means and checks to run. Always verify their work yourself (git diff, tests) before ' +
+  'reporting it as done. Do small edits yourself. Helpers never commit; you commit only when the user asks.';
+
 export function createMcpHandler({ config, cwd, run }) {
   return async function handle(msg) {
     if (!msg || typeof msg !== 'object') return null;
@@ -42,6 +51,7 @@ export function createMcpHandler({ config, cwd, run }) {
           protocolVersion: typeof params?.protocolVersion === 'string' ? params.protocolVersion : '2025-06-18',
           capabilities: { tools: {} },
           serverInfo: { name: 'jarvis-helpers', version: '1.0.0' },
+          instructions: INSTRUCTIONS,
         });
       case 'ping':
         return reply({});

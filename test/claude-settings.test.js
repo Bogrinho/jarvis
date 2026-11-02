@@ -16,3 +16,13 @@ test('writes a status-line settings file pointing at the Jarvis helper', () => {
   assert.ok(!j.statusLine.command.includes(String.fromCharCode(92)), 'forward slashes work in every shell');
   assert.deepEqual(Object.keys(j), ['statusLine']);
 });
+
+test('writes the helpers MCP config with the absolute script path', async () => {
+  const { writeClaudeJarvisMcp } = await import('../src/claude-settings.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Έγγραφα-jv-'));
+  const file = writeClaudeJarvisMcp(root);
+  const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(Object.keys(j.mcpServers), ['jarvis-helpers']);
+  assert.equal(j.mcpServers['jarvis-helpers'].command, 'node');
+  assert.equal(j.mcpServers['jarvis-helpers'].args[0], path.join(root, 'scripts', 'helpers-mcp.js'));
+});

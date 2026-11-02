@@ -183,3 +183,9 @@ test('the Gemini account runs the Antigravity CLI (agy)', () => {
   assert.equal(c.accounts.gemini.cli, 'agy');
   assert.equal(c.accounts.gemini.label, 'Gemini');
 });
+
+test('the old work folder stays marked as work so personal helpers never run there', () => {
+  const c = loadConfig('jarvis.config.json');
+  const w = c.projects.find((p) => p.side === 'work');
+  assert.ok(w && /act-as-my-coding-agent-we$/.test(w.path));
+});

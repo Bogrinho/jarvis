@@ -12,6 +12,11 @@ export const HELPER_TIMEOUT_MS = 15 * 60 * 1000;
 
 // Headless agy auto-denies shell commands and then stops with no answer, so steer it to
 // its own file tools up front.
+const CODEX_PREAMBLE =
+  'You are a helper: the task below comes from Claude, the team leader. Do exactly the task, stay inside this ' +
+  'folder, run the relevant tests when you change code and report the results honestly. Do not commit or push. ' +
+  'End with a short report: what you did, files changed, test results, anything left open.\n\n';
+
 const GEMINI_PREAMBLE =
   'You are running headless: shell commands (run_command) are not allowed and will be denied. ' +
   'Use your file tools instead: list_dir, find_by_name, grep_search, view_file (and edit tools only if the task asks for changes). ' +
@@ -107,6 +112,6 @@ export function runHelper({ config, kind, task, cwd, spawn = cp.spawn, timeoutMs
       if (!answer) return reject(new Error(`Ο βοηθός δεν έδωσε απάντηση (κωδικός ${code}): ${err.trim().slice(-800) || 'χωρίς μήνυμα'}`));
       resolve({ account: account.label, answer, exitCode: code });
     });
-    if (l.stdin) child.stdin?.end(task); else child.stdin?.end();
+    if (l.stdin) child.stdin?.end(CODEX_PREAMBLE + task); else child.stdin?.end();
   });
 }

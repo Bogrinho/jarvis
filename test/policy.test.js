@@ -169,3 +169,12 @@ test('claude launched by Jarvis gets the status-line settings file (for live usa
   assert.ok(!buildLaunch(cfg.accounts.claude).args.includes('--settings'));
   assert.ok(!buildLaunch(cfg.accounts.mine, { claudeSettingsFile: 'x.json' }).args.includes('--settings'));
 });
+
+test('claude launched by Jarvis gets the helpers MCP config', () => {
+  const { cfg } = makeConfig();
+  const l = buildLaunch(cfg.accounts.claude, { claudeSettingsFile: 's.json', claudeMcpFile: 'm.json' });
+  const i = l.args.indexOf('--mcp-config');
+  assert.ok(i > 0);
+  assert.equal(l.args[i + 1], 'm.json');
+  assert.ok(!buildLaunch(cfg.accounts.mine, { claudeMcpFile: 'm.json' }).args.includes('--mcp-config'));
+});

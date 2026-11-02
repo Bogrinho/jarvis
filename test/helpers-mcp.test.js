@@ -44,3 +44,11 @@ test('mcp script starts and answers over stdio', async () => {
   assert.equal(lines[0].result.serverInfo.name, 'jarvis-helpers');
   assert.equal(lines[1].result.tools.length, 2);
 });
+
+test('mcp initialize tells the leader how the team works', async () => {
+  const handle = createMcpHandler({ config: { accounts: {}, projects: [] }, cwd: 'C:/p', run: async () => ({}) });
+  const init = await handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+  assert.match(init.result.instructions, /leader/i);
+  assert.match(init.result.instructions, /ask_codex/);
+  assert.match(init.result.instructions, /ask_gemini/);
+});

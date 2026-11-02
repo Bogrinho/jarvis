@@ -182,6 +182,7 @@ export function createServer({
     watch: deps.watch ?? fs.watch,
     log: deps.log ?? (() => {}),
     claudeSettingsFile: deps.claudeSettingsFile ?? null,
+    claudeMcpFile: deps.claudeMcpFile ?? null,
   };
   const port = config.port;
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -298,7 +299,7 @@ export function createServer({
       target = resolveTarget(config, { accountId, projectPath: projectPath || undefined, useHome: useHome === true });
     }
     const account = config.accounts[accountId];
-    const launch = buildLaunch(account, { claudeSettingsFile: d.claudeSettingsFile });
+    const launch = buildLaunch(account, { claudeSettingsFile: d.claudeSettingsFile, claudeMcpFile: d.claudeMcpFile });
     if (!title) {
       const project = config.projects.find((p) => path.resolve(p.path).toLowerCase() === path.resolve(target.cwd).toLowerCase());
       title = jobPrompt ? jobPrompt.slice(0, 60) : `${account.label} · ${project ? project.name : 'home'}`;

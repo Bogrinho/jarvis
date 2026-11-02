@@ -8,7 +8,7 @@ import { JobManager } from './jobs.js';
 import { createServer } from './server.js';
 import { createChat } from './chat/setup.js';
 import { refreshWindowsPath } from './winpath.js';
-import { writeClaudeJarvisSettings } from './claude-settings.js';
+import { writeClaudeJarvisSettings, writeClaudeJarvisMcp } from './claude-settings.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noOpen = process.argv.includes('--no-open');
@@ -20,6 +20,8 @@ fs.mkdirSync(dataDir, { recursive: true });
 const logFile = path.join(dataDir, 'server.log');
 let claudeSettingsFile = null;
 try { claudeSettingsFile = writeClaudeJarvisSettings(config.rootDir); } catch { /* usage falls back to tokens */ }
+let claudeMcpFile = null;
+try { claudeMcpFile = writeClaudeJarvisMcp(config.rootDir); } catch { /* Claude still runs, without helpers */ }
 
 function log(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;
@@ -70,7 +72,7 @@ async function shutdown(code = 0) {
   process.exit(code);
 }
 
-const server = createServer({ config, jobs, token, onShutdown: () => shutdown(0), chats: chat.manager, chatHistory: chat.history, deps: { log, claudeSettingsFile } });
+const server = createServer({ config, jobs, token, onShutdown: () => shutdown(0), chats: chat.manager, chatHistory: chat.history, deps: { log, claudeSettingsFile, claudeMcpFile } });
 
 process.on('uncaughtException', (e) => log(`uncaught: ${e?.stack ?? e}`));
 process.on('unhandledRejection', (e) => log(`unhandled rejection: ${e?.stack ?? e}`));

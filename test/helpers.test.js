@@ -64,7 +64,7 @@ test('codex helper: personal login, workspace sandbox, task on stdin, final answ
   assert.ok(!call.args.some((a) => /dangerously/.test(a)));
   assert.equal(call.args.at(-1), '-');
   assert.ok(!call.args.some((a) => a.includes('Έλεγξε')), 'task text never on the command line');
-  assert.equal(call.stdin, 'Έλεγξε το app.js & πες μου "τι" βλέπεις');
+  assert.ok(call.stdin.endsWith('Έλεγξε το app.js & πες μου "τι" βλέπεις'));
   assert.equal(call.opts.cwd, os.tmpdir());
 });
 
@@ -128,4 +128,12 @@ test('an empty answer reports what the helper said on stderr', async () => {
     return child;
   };
   await assert.rejects(runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn }), /command" permission/);
+});
+
+test('codex gets the helper rules before the task', async () => {
+  const c = config();
+  const { spawn, calls } = fakeSpawn({ answer: 'ok' });
+  await runHelper({ config: c, kind: 'codex', task: 'do x', cwd: os.tmpdir(), spawn });
+  assert.match(calls[0].stdin, /Do not commit/);
+  assert.ok(calls[0].stdin.endsWith('do x'));
 });
