@@ -500,6 +500,9 @@ function onMessage(ev) {
     case 'usage':
       if (msg.usage && typeof msg.usage === 'object') { S.usage = msg.usage; renderVitals(); }
       break;
+    case 'directives':
+      if (Array.isArray(msg.list)) { S.directives = msg.list; renderDirectives(); }
+      break;
     case 'scrollback': {
       const pane = panes.get(msg.id);
       if (pane?.term && typeof msg.data === 'string') {

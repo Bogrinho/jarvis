@@ -397,3 +397,27 @@ test('shutdown requires the token', async () => {
   await new Promise((res) => setTimeout(res, 30));
   assert.equal(shut, 0);
 });
+
+test('editing the directives file pushes the new list over ws', async () => {
+  const ctx = await setup();
+  const ws = openWs(ctx);
+  assert.deepEqual(await wsOutcome(ws), { open: true });
+  await new Promise((r) => setTimeout(r, 100));
+  fs.writeFileSync(path.join(ctx.dir, 'vault', 'today.md'), '- [ ] changed task\n- [ ] another\n');
+  await until(() => ws.received.some((m) => m.type === 'directives'
+    && m.list.length === 2 && m.list[0].text === 'changed task' && m.list[0].done === false));
+});
+
+test('usage refresh re-reads directives as a fallback and only broadcasts changes', async () => {
+  const ctx = await setup({ deps: { watch: () => ({ close() {}, on() {} }) } });
+  const ws = openWs(ctx);
+  assert.deepEqual(await wsOutcome(ws), { open: true });
+  await ctx.server.refreshUsage();
+  assert.equal(ws.received.filter((m) => m.type === 'directives').length, 0);
+  fs.writeFileSync(path.join(ctx.dir, 'vault', 'today.md'), '- [x] via refresh\n');
+  await ctx.server.refreshUsage();
+  await until(() => ws.received.some((m) => m.type === 'directives' && m.list[0]?.text === 'via refresh'));
+  await ctx.server.refreshUsage();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(ws.received.filter((m) => m.type === 'directives').length, 1);
+});

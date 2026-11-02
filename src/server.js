@@ -1,6 +1,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import fs from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -142,6 +143,7 @@ export function createServer({
     perDayRate: deps.perDayRate ?? defaultPerDayRate,
     readDirectives: deps.readDirectives ?? defaultReadDirectives,
     historyFile: deps.historyFile ?? path.join(config.rootDir, 'data', 'usage-history.json'),
+    watch: deps.watch ?? fs.watch,
     log: deps.log ?? (() => {}),
   };
   const port = config.port;
@@ -151,6 +153,10 @@ export function createServer({
   let usage = {};
   let usageTimer = null;
   let refreshing = false;
+  let lastDirectives = null; // JSON of the last list sent/served
+  let directivesWatcher = null;
+  let closed = false;
+  let directivesDebounce = null;
 
   const hostOk = (req) => {
     const host = String(req.headers.host ?? '').toLowerCase();
@@ -186,12 +192,41 @@ export function createServer({
     } finally {
       refreshing = false;
     }
+    await checkDirectives(); // fallback for missed fs.watch events
+  }
+
+  // ---------- directives (today.md) ----------
+  async function readDirectivesSafe() {
+    try { return await d.readDirectives(config.directivesFile); } catch { return []; }
+  }
+
+  async function checkDirectives() {
+    const list = await readDirectivesSafe();
+    const json = JSON.stringify(list);
+    if (json === lastDirectives) return;
+    lastDirectives = json;
+    broadcast({ type: 'directives', list });
+  }
+
+  function watchDirectives() {
+    if (closed || directivesWatcher) return;
+    const dir = path.dirname(config.directivesFile);
+    const name = path.basename(config.directivesFile).toLowerCase();
+    try {
+      directivesWatcher = d.watch(dir, (event, filename) => {
+        if (filename && String(filename).toLowerCase() !== name) return;
+        clearTimeout(directivesDebounce);
+        directivesDebounce = setTimeout(() => { checkDirectives().catch(() => {}); }, 300);
+      });
+      directivesWatcher.on?.('error', (e) => d.log(`directives watch: ${e.message}`));
+    } catch (e) {
+      d.log(`directives watch unavailable: ${e.message}`);
+    }
   }
 
   // ---------- REST ----------
   async function state() {
-    let directives = [];
-    try { directives = await d.readDirectives(config.directivesFile); } catch { directives = []; }
+    const directives = await readDirectivesSafe();
     return {
       accounts: Object.values(config.accounts).map(({ id, label, side, color, enabled }) => ({ id, label, side, color, enabled })),
       projects: config.projects.map(({ name, path: p, side }) => ({ name, path: p, side })),
@@ -378,10 +413,15 @@ export function createServer({
         server.listen(port, '127.0.0.1', () => {
           server.off('error', onError);
           server.on('error', (e) => d.log(`server error: ${e.message}`));
-          refreshUsage();
           usageTimer = setInterval(refreshUsage, usageIntervalMs);
           usageTimer.unref?.();
-          resolve();
+          // Baseline the directives list first so only real edits are broadcast.
+          readDirectivesSafe().then((list) => {
+            lastDirectives ??= JSON.stringify(list);
+            watchDirectives();
+            refreshUsage();
+            resolve();
+          });
         });
       });
     },
@@ -390,7 +430,11 @@ export function createServer({
     },
     refreshUsage,
     close() {
+      closed = true;
       clearInterval(usageTimer);
+      clearTimeout(directivesDebounce);
+      try { directivesWatcher?.close(); } catch { /* already closed */ }
+      directivesWatcher = null;
       jobs.off('data', onData);
       jobs.off('state', onJobChange);
       jobs.off('exit', onJobChange);
