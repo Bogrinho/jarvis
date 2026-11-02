@@ -11,7 +11,7 @@ const LOOK = {
   work: { name: 'CODEX', display: 'Codex Δουλειά', mode: 'Codex mode · λογαριασμός δουλειάς', card: 'Codex δουλειά · weekly usage' },
   mine: { name: 'CODEX', display: 'Codex Δικό μου', mode: 'Codex mode · προσωπικός λογαριασμός', card: 'Codex δικό μου · weekly usage' },
   claude: { name: 'CLAUDE', display: 'Claude Code', mode: 'Original Jarvis core · Claude Code mode', card: 'Claude · weekly usage' },
-  gemini: { name: 'GEMINI', display: 'Gemini', mode: 'Gemini mode · σύντομα', card: 'Gemini · weekly usage' },
+  gemini: { name: 'GEMINI', display: 'Gemini', mode: 'Gemini mode · Antigravity CLI', card: 'Gemini · weekly usage' },
 };
 const look = (acc) => LOOK[acc.id] ?? {
   name: acc.label.toUpperCase(), display: acc.label, mode: `${acc.label} mode`, card: `${acc.label} · weekly usage`,

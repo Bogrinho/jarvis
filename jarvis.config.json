@@ -21,7 +21,7 @@
     },
     "gemini": {
       "label": "Gemini",
-      "cli": "gemini",
+      "cli": "agy",
       "side": "personal",
       "mode": "edit-in-project",
       "home": ".",

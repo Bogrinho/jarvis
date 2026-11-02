@@ -7,10 +7,12 @@ import { loadConfig } from './config.js';
 import { JobManager } from './jobs.js';
 import { createServer } from './server.js';
 import { createChat } from './chat/setup.js';
+import { refreshWindowsPath } from './winpath.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noOpen = process.argv.includes('--no-open');
 
+refreshWindowsPath(); // find CLIs installed since login (e.g. agy via winget)
 const config = loadConfig(path.join(ROOT, 'jarvis.config.json'));
 const dataDir = path.join(config.rootDir, 'data');
 fs.mkdirSync(dataDir, { recursive: true });

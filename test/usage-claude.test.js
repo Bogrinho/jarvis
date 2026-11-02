@@ -146,3 +146,11 @@ test('codex usage uses the newer of live limits and session files; live is asked
   const r2 = await collectUsage(config, { ...deps, readCodexUsage: async () => at('2026-11-02T17:00:00Z', 50), liveCache: new Map(), now: t0 });
   assert.equal(r2.mine.weekly.pct, 50);
 });
+
+test('antigravity accounts report no local usage data', async () => {
+  const config = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
+  config.accounts.gemini.enabled = true;
+  config.accounts.gemini.cli = 'agy';
+  const r = await collectUsage(config, { readCodexUsage: async () => null, readCodexLive: async () => null, readClaudeUsage: async () => null });
+  assert.equal(r.gemini.reason, 'no local usage data');
+});

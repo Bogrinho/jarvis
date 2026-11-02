@@ -151,3 +151,13 @@ test('codex launch without CODEX_HOME is refused', () => {
   const acct = { ...cfg.accounts.mine, env: {} };
   assert.throws(() => buildLaunch(acct), (e) => e instanceof PolicyError);
 });
+
+test('antigravity (agy) launch: accept-edits mode, cautious asks for everything', () => {
+  const { cfg } = makeConfig();
+  const acc = { ...cfg.accounts.gemini, cli: 'agy' };
+  const l = buildLaunch(acc);
+  assert.deepEqual(l.args.slice(-3), ['agy', '--mode', 'accept-edits']);
+  assert.ok(!l.args.includes('--dangerously-skip-permissions'));
+  const c = buildLaunch({ ...acc, mode: 'cautious' });
+  assert.equal(c.args.at(-1), 'agy');
+});

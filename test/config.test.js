@@ -177,3 +177,9 @@ test('duplicate project paths are rejected regardless of side', () => {
   ];
   rejects(raw2, /projects\[1\]\.path/);
 });
+
+test('the Gemini account runs the Antigravity CLI (agy)', () => {
+  const c = loadConfig('jarvis.config.json');
+  assert.equal(c.accounts.gemini.cli, 'agy');
+  assert.equal(c.accounts.gemini.label, 'Gemini');
+});

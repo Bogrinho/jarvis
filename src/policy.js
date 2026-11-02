@@ -8,7 +8,7 @@ export class PolicyError extends Error {
   }
 }
 
-// Flags verified against `--help` of codex-cli 0.166.0, claude 2.1.316, gemini 0.66.0.
+// Flags verified against `--help` of codex-cli 0.166.0, claude 2.1.316, gemini 0.66.0, agy 1.4.12.
 // codex no longer accepts `--ask-for-approval untrusted` (only on-request|never),
 // so "cautious" is expressed through the read-only sandbox.
 const MODE_ARGS = {
@@ -23,6 +23,12 @@ const MODE_ARGS = {
   gemini: {
     cautious: ['--approval-mode', 'default'],
     'edit-in-project': ['--approval-mode', 'auto_edit'],
+  },
+  // Antigravity CLI (Google's replacement for Gemini CLI on personal / AI Pro accounts).
+  // No flag = asks before every tool; accept-edits = edits freely, still asks for commands.
+  agy: {
+    cautious: [],
+    'edit-in-project': ['--mode', 'accept-edits'],
   },
 };
 

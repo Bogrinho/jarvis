@@ -9,7 +9,7 @@ export class ConfigError extends Error {
   }
 }
 
-const CLIS = ['codex', 'claude', 'gemini'];
+const CLIS = ['codex', 'claude', 'gemini', 'agy'];
 const SIDES = ['work', 'personal'];
 const MODES = ['cautious', 'edit-in-project'];
 const COLORS = { work: '#5b8cff', mine: '#5fd39a', claude: '#e0609a', gemini: '#a98bff' };
