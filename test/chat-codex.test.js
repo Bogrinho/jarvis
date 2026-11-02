@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
+import { spawn as cpSpawn } from 'node:child_process';
 import { CodexAppServer, createCodexAdapter, listCodexThreads, readCodexHistory } from '../src/chat/codex.js';
 
 const FAKE = fileURLToPath(new URL('./fixtures/fake-codex-app-server.js', import.meta.url));
@@ -436,4 +437,49 @@ test('serverRequest/resolved expires that approval and resumes working', async (
   assert.equal(exp[1], ap[1].token);
   assert.deepEqual(states(ev), ['working', 'waiting', 'working', 'idle']);
   assert.throws(() => a.answer(ap[1].token, 'approve'));
+});
+
+// ---- final review fixes ----
+
+test('normalizeCwd folds NFD Greek paths to NFC', async () => {
+  const { normalizeCwd } = await import('../src/chat/codex.js');
+  const nfd = 'C:\Έργα\Δοκιμή'.normalize('NFD');
+  assert.notEqual(nfd, nfd.normalize('NFC'));
+  assert.equal(normalizeCwd(nfd), normalizeCwd(nfd.normalize('NFC')));
+  assert.equal(normalizeCwd(nfd), normalizeCwd(nfd).normalize('NFC'));
+});
+
+test('send after close sends no turn/start', async (t) => {
+  const { server } = mkServer();
+  t.after(() => server.close());
+  const a = createCodexAdapter({ server, account: { mode: 'cautious' }, cwd: 'C:\proj' });
+  await a.start({ conv: { id: 'c' } });
+  a.close();
+  a.send('late');
+  await new Promise(r => setTimeout(r, 150));
+  assert.equal((await sentRequests(server, 'turn/start')).length, 0);
+});
+
+test('initialize that never answers times out, kills the server and the next call starts fresh', async (t) => {
+  let n = 0;
+  const logs = [];
+  const server = new CodexAppServer({
+    env: { ...process.env },
+    initTimeoutMs: 700,
+    log: (...a) => logs.push(a.join(' ')),
+    spawn: (f, a, o) => {
+      n += 1;
+      const script = n === 1 ? 'setInterval(() => {}, 1000)' : null;
+      return script ? cpSpawn(process.execPath, ['-e', script], o) : cpSpawn(process.execPath, [FAKE], o);
+    },
+  });
+  t.after(() => server.close());
+  const first = server.child;
+  const err = await server.request('thread/list', {}).then(() => null, e => e);
+  assert.match(err?.message ?? '', /initialize/);
+  assert.equal(server.child, null);
+  const r = await server.request('fake/log', {});
+  assert.ok(Array.isArray(r.received));
+  assert.equal(n, 2);
+  void first;
 });

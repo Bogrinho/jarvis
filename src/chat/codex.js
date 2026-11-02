@@ -29,10 +29,10 @@ export class CodexAppServer {
   #opts; #child = null; #starting = null; #pending = new Map(); #nextId = 1;
   #notif = new Set(); #reqHandlers = new Set(); #exitHandlers = new Set();
 
-  constructor({ codexCmd = 'codex', env, spawn = cp.spawn, file, args, log = console.warn } = {}) {
+  constructor({ codexCmd = 'codex', env, spawn = cp.spawn, file, args, log = console.warn, initTimeoutMs = 20000 } = {}) {
     // Never inherit process.env by accident: it must be the account env from policy.buildEnv.
     if (!env || typeof env !== 'object') throw new TypeError('CodexAppServer needs an explicit env (policy.buildEnv)');
-    this.#opts = { codexCmd, env, spawn, file, args, log };
+    this.#opts = { codexCmd, env, spawn, file, args, log, initTimeoutMs };
   }
 
   get child() { return this.#child; }
@@ -41,7 +41,20 @@ export class CodexAppServer {
     if (this.#starting) return this.#starting;
     const p = (async () => {
       this.#spawn();
-      await this.#rawRequest('initialize', { clientInfo: { name: 'jarvis', title: 'Jarvis', version: VERSION }, capabilities: null });
+      const child = this.#child;
+      const timer = setTimeout(() => {
+        if (this.#child !== child) return;
+        const err = new Error(`codex app-server did not answer initialize within ${this.#opts.initTimeoutMs} ms`);
+        err.code = 'INIT_TIMEOUT';
+        this.#opts.log(err.message);
+        for (const { reject } of this.#pending.values()) reject(err);
+        this.#pending.clear();
+        this.close(); // detaches (clears #child/#starting) and kills the process tree
+      }, this.#opts.initTimeoutMs);
+      timer.unref?.();
+      try {
+        await this.#rawRequest('initialize', { clientInfo: { name: 'jarvis', title: 'Jarvis', version: VERSION }, capabilities: null });
+      } finally { clearTimeout(timer); }
       this.#write({ method: 'initialized' });
     })();
     this.#starting = p;
@@ -369,6 +382,7 @@ class CodexAdapter extends EventEmitter {
   }
 
   async #send(text) {
+    if (this.#closed) return;
     const input = [{ type: 'text', text, text_elements: [] }];
     // A pending approval still blocks the turn: stay 'waiting' until it is answered.
     this.#setState(this.#approvals.size ? 'waiting' : 'working');
@@ -567,7 +581,7 @@ export function createCodexAdapter({ server, account, cwd }) {
 // ---- past threads -------------------------------------------------------------
 
 export function normalizeCwd(p) {
-  return String(p ?? '').replace(/^\\\\\?\\/, '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  return String(p ?? '').replace(/^\\\\\?\\/, '').replace(/\//g, '\\').replace(/\\+$/, '').normalize('NFC').toLowerCase();
 }
 
 const toIso = t => (typeof t === 'number' ? new Date(t < 1e12 ? t * 1000 : t).toISOString() : t ?? null);
