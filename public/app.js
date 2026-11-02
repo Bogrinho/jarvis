@@ -390,12 +390,16 @@ function sendWs(msg) {
 function createPane(job) {
   const acc = account(job.accountId);
   const color = safeColor(acc?.color);
+  const rgb = hexRgb(color).join(',');
   const title = el('b');
-  const stateEl = el('em');
-  const close = el('button', { type: 'button', 'aria-label': 'Κλείσιμο', text: '✕' });
+  const stateEl = el('em', { class: 'chip' });
+  const close = el('button', { type: 'button', class: 'x', 'aria-label': 'Κλείσιμο', text: '✕' });
   const host = el('div', { class: 'xt' });
-  const node = el('div', { class: 'term', style: { '--c': color } },
-    el('header', {}, title, el('span', { class: 'r' }, el('span', { text: acc ? look(acc).display : job.accountId }), stateEl, close)),
+  const node = el('div', { class: 'term', style: { '--c': color, '--c-rgb': rgb } },
+    el('header', {},
+      el('span', { class: 'l' }, el('i', { class: 'dot', 'aria-hidden': 'true' }), title),
+      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, close)),
+    el('div', { class: 'beam', 'aria-hidden': 'true' }),
     host);
   node.addEventListener('mousedown', () => { if (S.focused !== job.id) focusJob(job.id); });
   close.addEventListener('click', () => closeJob(job.id));
@@ -405,10 +409,29 @@ function createPane(job) {
   if (typeof window.Terminal === 'function') {
     term = new window.Terminal({
       fontFamily: '"JetBrains Mono", monospace',
-      fontSize: 12,
+      fontSize: 13,
+      lineHeight: 1.3,
       cursorBlink: true,
+      cursorStyle: 'bar',
+      cursorWidth: 2,
       scrollback: 5000,
-      theme: { background: '#0b0a0c', foreground: '#d6d0d9', cursor: color, selectionBackground: '#3a3440' },
+      allowTransparency: true,
+      theme: {
+        // transparent so the glass panel behind shows through; palette tuned to the HUD
+        background: 'rgba(0,0,0,0)',
+        foreground: '#e2dce5',
+        cursor: color,
+        cursorAccent: '#0f0d10',
+        selectionBackground: `rgba(${rgb},0.30)`,
+        black: '#1a1620', brightBlack: '#6b6472',
+        red: '#ff6b8a', brightRed: '#ff8fa6',
+        green: '#5fd39a', brightGreen: '#86e3b4',
+        yellow: '#f2c66d', brightYellow: '#f7d78f',
+        blue: '#6f9bff', brightBlue: '#93b4ff',
+        magenta: '#e0609a', brightMagenta: '#ee8bb8',
+        cyan: '#6fd6e8', brightCyan: '#9be5f0',
+        white: '#d6d0d9', brightWhite: '#f4f0f5',
+      },
     });
     if (window.FitAddon?.FitAddon) {
       fit = new window.FitAddon.FitAddon();
@@ -485,6 +508,7 @@ function renderJobs() {
     }
     pane.title.textContent = job.title;
     pane.stateEl.textContent = STATE_LABEL[job.state] ?? job.state;
+    pane.node.dataset.state = job.state;
     pane.node.classList.toggle('focus', job.id === S.focused);
   }
   for (const [id, pane] of panes) {

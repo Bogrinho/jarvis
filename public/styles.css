@@ -134,3 +134,55 @@ button:focus-visible{outline:1px solid rgb(var(--acc-rgb));outline-offset:2px}
 .down[hidden]{display:none}
 .down b{font:300 32px/1.2 Jura,sans-serif;letter-spacing:.12em;text-transform:uppercase}
 .down p{color:var(--muted);margin-top:10px;font-size:11px}
+
+/* ---------- terminal panes: holo glass (overrides the plain look above) ---------- */
+.drawer{gap:14px;padding:4px 20px 18px}
+.term{
+  --c-rgb:140,133,146;
+  position:relative;overflow:hidden;min-height:0;
+  border:1px solid rgba(var(--c-rgb),.28);border-radius:14px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(var(--c-rgb),.14), transparent 55%),
+    radial-gradient(90% 70% at 100% 100%, rgba(var(--c-rgb),.08), transparent 60%),
+    linear-gradient(rgba(var(--c-rgb),.035) 1px, transparent 1px) 0 0/100% 26px,
+    rgba(14,12,17,.78);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:0 18px 40px -24px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.04);
+  transition:border-color .25s, box-shadow .25s;
+}
+.term.focus{
+  border-color:rgba(var(--c-rgb),.65);
+  box-shadow:0 0 0 1px rgba(var(--c-rgb),.25), 0 0 32px -6px rgba(var(--c-rgb),.45), 0 18px 40px -24px rgba(0,0,0,.9);
+}
+.term header{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 14px;border-bottom:1px solid rgba(var(--c-rgb),.16);
+  font-size:10px;color:var(--ink);background:linear-gradient(rgba(var(--c-rgb),.08), transparent);
+}
+.term header .l{display:flex;align-items:center;gap:9px;min-width:0}
+.term header b{font:600 13px/1.2 Jura,sans-serif;letter-spacing:.04em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.term header .r{display:flex;gap:10px;align-items:center;flex:none}
+.term header .who{color:var(--c);font-size:10px;letter-spacing:.06em}
+.term .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 0 3px rgba(var(--c-rgb),.18)}
+.term[data-state="working"] .dot{animation:pulse 1.4s ease-in-out infinite}
+.term[data-state="error"] .dot{background:#ff6b8a;box-shadow:0 0 0 3px rgba(255,107,138,.2)}
+.term[data-state="done"] .dot{background:#5d5763;box-shadow:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 2px rgba(var(--c-rgb),.25)}50%{box-shadow:0 0 0 6px rgba(var(--c-rgb),.05)}}
+.term .chip{font-style:normal;font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:999px;
+  color:var(--muted);border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.term[data-state="working"] .chip{color:var(--c);border-color:rgba(var(--c-rgb),.45);background:rgba(var(--c-rgb),.1)}
+.term[data-state="error"] .chip{color:#ff8fa6;border-color:rgba(255,107,138,.45)}
+.term .x{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:var(--muted);font-size:11px;padding:0}
+.term .x:hover{color:var(--ink);background:rgba(var(--c-rgb),.18)}
+/* thin light that runs under the header while the AI is working */
+.term .beam{height:1px;background:transparent;position:relative;overflow:hidden}
+.term[data-state="working"] .beam::after{content:"";position:absolute;inset:0 auto 0 -40%;width:40%;
+  background:linear-gradient(90deg,transparent,rgba(var(--c-rgb),.9),transparent);animation:beam 1.6s linear infinite}
+@keyframes beam{to{left:100%}}
+.term .xt{height:340px;padding:10px 6px 8px 14px}
+.drawer[style*="--cols: 1"] .term .xt,.drawer[style*="--cols:1"] .term .xt{height:min(52vh,560px)}
+.term .xterm,.term .xterm .xterm-viewport,.term .xterm-screen{background:transparent !important}
+.term .xterm-viewport{scrollbar-width:thin;scrollbar-color:rgba(var(--c-rgb),.35) transparent}
+.term .xterm-viewport::-webkit-scrollbar{width:6px}
+.term .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(var(--c-rgb),.35);border-radius:3px}
+@media (prefers-reduced-motion:reduce){.term[data-state="working"] .dot,.term[data-state="working"] .beam::after{animation:none}}
