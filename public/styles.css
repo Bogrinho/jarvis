@@ -47,6 +47,8 @@ button:focus-visible{outline:1px solid rgb(var(--acc-rgb));outline-offset:2px}
 .scale{position:relative;height:14px;margin-top:8px;border-radius:2px;background:linear-gradient(90deg,rgba(var(--acc-rgb),.75),rgba(var(--acc-rgb),.25) 60%,#2a2530 61%);transition:background .6s}
 .scale::after{content:"";position:absolute;top:-4px;bottom:-4px;left:var(--p,39%);width:2px;background:#fff;box-shadow:0 0 10px #fff}
 .ticks{display:flex;justify-content:space-between;color:var(--faint);font-size:8px;margin-top:4px}
+.upd{font-size:8px;letter-spacing:.06em;color:var(--faint);margin-top:2px}
+.card .upd{margin-top:6px}
 .dir li{list-style:none;display:flex;gap:8px;color:#c9c2cc;margin-bottom:8px;font-size:10px}
 .dir li::before{content:"";flex:none;width:9px;height:9px;border:1px solid var(--faint);margin-top:2px}
 .ghost{border:1px solid var(--line);padding:3px 8px;font-size:9px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;border-radius:2px}

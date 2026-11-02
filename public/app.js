@@ -19,6 +19,7 @@ const look = (acc) => LOOK[acc.id] ?? {
 const ERRORS = {
   NO_HOME: 'Ορίσε φάκελο για αυτόν τον λογαριασμό στο jarvis.config.json',
   SIDE_MISMATCH: 'Αυτό το project δεν επιτρέπεται με αυτόν τον λογαριασμό',
+  UNKNOWN_PROJECT: 'Αυτό το project δεν υπάρχει πια στο jarvis.config.json',
   DISABLED: 'Ο λογαριασμός δεν έχει ρυθμιστεί ακόμα',
 };
 const errorText = (code) => ERRORS[code] ?? `Κάτι πήγε στραβά (${code})`;
@@ -69,6 +70,15 @@ function fmtReset(iso) {
   const hm = d.toTimeString().slice(0, 5);
   return d.getTime() - Date.now() < 20 * 3600e3 ? `reset ${hm}` : `reset ${DAYS[d.getDay()]} ${hm}`;
 }
+const WEEKDAYS = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ'];
+// "updated 14:05" today, "updated Δευ 14:05" on another day; '' when unknown.
+function fmtUpdated(iso) {
+  const d = new Date(iso);
+  if (iso == null || Number.isNaN(d.getTime())) return '';
+  const hm = d.toTimeString().slice(0, 5);
+  return d.toDateString() === new Date().toDateString() ? `updated ${hm}` : `updated ${WEEKDAYS[d.getDay()]} ${hm}`;
+}
+const updatedText = (view) => (view && view.kind !== 'none' ? fmtUpdated(view.updatedAt) : '');
 function showMsg(node, text, ok = false) {
   node.textContent = text;
   node.classList.toggle('ok', ok);
@@ -113,7 +123,6 @@ async function api(method, path, body) {
 
 // ---------- orb + switcher ----------
 const orb = createOrb($('orb'), { shape: S.selected, rgb: [224, 96, 154], pauseButton: $('pause') });
-window.setShape = (k) => orb.setShape(k);
 
 function renderSwitcher() {
   const nav = $('switch');
@@ -206,10 +215,12 @@ function renderVitals() {
       big.textContent = !acc.enabled || view?.reason === 'not set up' ? 'not set up' : 'no data';
       if (view?.reason) big.title = view.reason;
     }
+    const upd = updatedText(view);
     box.append(el('div', { class: 'vital', style: { '--c': color } },
       el('div', { class: 'lbl' }, look(acc).display, el('em', { text: perDayText(view?.perDay) })),
       big,
-      sparkline(view?.kind === 'percent' ? view.series : [], color)));
+      sparkline(view?.kind === 'percent' ? view.series : [], color),
+      upd ? el('div', { class: 'upd', text: upd }) : null));
   }
   renderCard();
 }
@@ -234,6 +245,9 @@ function renderCard() {
   $('cardN').textContent = n;
   $('cardU').textContent = unit;
   $('scale').style.setProperty('--p', `${Math.max(0, Math.min(100, p))}%`);
+  const upd = updatedText(view);
+  $('cardUpd').textContent = upd;
+  $('cardUpd').hidden = !upd;
 }
 
 // ---------- directives + quick commands ----------
@@ -253,7 +267,14 @@ function renderSkills() {
   }
 }
 
-async function startJob(body, msgNode, button) {
+// A remembered project that the server no longer accepts for this account: fall back to the home folder next time.
+function forgetProject(accountId, code) {
+  if (code !== 'UNKNOWN_PROJECT' && code !== 'SIDE_MISMATCH') return;
+  delete S.lastProject[accountId];
+  store.set('jarvis.lastProject', S.lastProject);
+}
+
+async function startJob(body, msgNode, button, onError) {
   showMsg(msgNode, '');
   if (button) button.disabled = true;
   try {
@@ -263,6 +284,7 @@ async function startJob(body, msgNode, button) {
     return info;
   } catch (e) {
     showMsg(msgNode, e.code === 'OFFLINE' ? 'Jarvis is not running' : errorText(e.code));
+    onError?.(e.code);
     return null;
   } finally {
     if (button) button.disabled = false;
@@ -278,10 +300,13 @@ $('askForm').addEventListener('submit', async (e) => {
   const input = $('askInput');
   const prompt = input.value.trim();
   if (!prompt) return;
-  const last = S.lastProject[S.selected];
+  const accountId = S.selected;
+  const last = S.lastProject[accountId];
   const info = await startJob(
-    { accountId: S.selected, projectPath: last ?? undefined, useHome: !last, prompt },
+    { accountId, projectPath: last ?? undefined, useHome: !last, prompt },
     $('askMsg'),
+    null,
+    (code) => { if (last) forgetProject(accountId, code); },
   );
   if (info) input.value = '';
 });
@@ -302,6 +327,8 @@ function openPicker() {
     const info = await startJob(
       projectPath ? { accountId: acc.id, projectPath } : { accountId: acc.id, useHome: true },
       $('pickerMsg'),
+      null,
+      (code) => { if (projectPath && S.lastProject[acc.id] === projectPath) forgetProject(acc.id, code); },
     );
     if (!info) return;
     if (projectPath) S.lastProject[acc.id] = projectPath;
