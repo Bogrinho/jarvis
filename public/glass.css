@@ -1,0 +1,67 @@
+/* Glass + aurora theme (loaded last; remove the <link> to go back to the previous look).
+   Background: a slow aurora in the selected account's colour (--acc-rgb).
+   Surfaces: dark smoked glass whose top edge catches the light; the focused pane is brighter and lifts. */
+
+:root{
+  --glass-bg:linear-gradient(180deg,rgba(36,29,41,.52),rgba(13,11,16,.74));
+  --rim:linear-gradient(180deg,rgba(255,235,245,.30),rgba(var(--acc-rgb),.14) 18%,rgba(255,255,255,.035) 60%);
+  --rim-on:linear-gradient(180deg,rgba(255,244,250,.95),rgba(var(--c-rgb,var(--acc-rgb)),.62) 20%,rgba(var(--c-rgb,var(--acc-rgb)),.12) 55%,rgba(255,255,255,.05) 80%);
+}
+
+/* ---------- background ---------- */
+body{background:#060508}
+.app{background:transparent !important;position:relative;isolation:isolate}
+body::before,body::after{content:"";position:fixed;pointer-events:none;z-index:-1}
+body::before{inset:-20%;filter:blur(48px);opacity:.7;
+  background:
+    radial-gradient(30% 40% at 30% 38%,rgba(var(--acc-rgb),.55),transparent 70%),
+    radial-gradient(28% 35% at 72% 28%,rgba(96,78,200,.34),transparent 70%),
+    radial-gradient(40% 30% at 50% 82%,rgba(var(--acc-rgb),.30),transparent 70%),
+    radial-gradient(25% 25% at 88% 80%,rgba(96,78,200,.22),transparent 70%);
+  animation:aurora 22s ease-in-out infinite alternate;transition:background 1.2s}
+body::after{inset:0;opacity:.14;
+  background:repeating-radial-gradient(circle at 30% 30%,rgba(255,255,255,.06) 0 1px,transparent 1px 3px)}
+@keyframes aurora{to{transform:translate(4%,-3%) rotate(6deg)}}
+
+/* ---------- shared glass ---------- */
+.term,.chat,.card,.picker,.skills button,.switch,.dock .tab,.pill:not(.solid){
+  background:var(--glass-bg) !important;
+  backdrop-filter:blur(16px) saturate(1.25);-webkit-backdrop-filter:blur(16px) saturate(1.25);
+  border-color:transparent !important;position:relative}
+.term::before,.chat::before,.card::before,.picker::before,.skills button::before,.switch::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;z-index:2;
+  background:var(--rim);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}
+
+/* ---------- terminals and chats ---------- */
+.term,.chat{border-radius:14px;box-shadow:0 24px 50px -28px #000 !important;transition:transform .35s ease,box-shadow .35s ease}
+.term::before,.chat::before{background:linear-gradient(180deg,rgba(255,235,245,.30),rgba(var(--c-rgb),.16) 18%,rgba(255,255,255,.035) 60%)}
+.term.focus,.chat.focus{transform:translateY(-4px);
+  box-shadow:0 -14px 34px -26px rgba(var(--c-rgb),.75),0 30px 60px -30px #000 !important}
+.term.focus::before,.chat.focus::before{background:var(--rim-on)}
+.term header,.chat .hd{background:transparent !important;border-bottom-color:rgba(255,255,255,.05) !important}
+.term.focus header b{color:#fff}
+.term .dot{box-shadow:0 0 10px rgba(var(--c-rgb),.85)}
+.term:not(.focus) .dot{box-shadow:none;opacity:.6}
+.term[data-state="done"] .dot{background:#5d5763;box-shadow:none}
+
+/* ---------- side cards, skills, switch, dock ---------- */
+.card{border-radius:12px;padding:12px 14px}
+.skills button{border-radius:10px}
+.skills button:hover::before{background:var(--rim-on)}
+.switch{border-radius:12px}
+.dock{background:linear-gradient(180deg,transparent,rgba(6,5,8,.35)) !important;border-top-color:rgba(255,255,255,.04) !important}
+.dock .tab,.pill:not(.solid){border:1px solid rgba(255,255,255,.07) !important;border-radius:999px}
+.dock .tab.focus{border-color:rgba(var(--c-rgb),.55) !important}
+.picker{border-radius:14px;box-shadow:0 24px 60px -20px #000 !important}
+.picker::before{background:var(--rim-on)}
+
+/* the orb's name sits in the light */
+.core h1{text-shadow:0 0 30px rgba(var(--acc-rgb),.35)}
+
+@media (prefers-reduced-motion:reduce){
+  body::before{animation:none}
+  .term,.chat{transition:none}
+  .term.focus,.chat.focus{transform:none}
+}
