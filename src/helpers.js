@@ -48,12 +48,28 @@ export function checkFolder(config, cwd) {
 }
 
 // Exact command lines (verified against codex-cli 0.166.0 and agy 1.4.12 --help).
+// A node_modules that is a link to a folder outside the project (e.g. a Windows junction):
+// builds write there (Vite's temp config), so the Codex sandbox must be allowed to.
+// Skips paths with characters cmd.exe would treat specially.
+function linkedNodeModules(cwd) {
+  try {
+    const p = path.join(cwd, 'node_modules');
+    if (!fs.lstatSync(p).isSymbolicLink()) return null;
+    const real = fs.realpathSync(p);
+    if (within(real, cwd) || /["&|<>^%]/.test(real)) return null;
+    return real;
+  } catch {
+    return null;
+  }
+}
+
 export function helperLaunch(account, cwd, outFile) {
   const env = buildEnv(account.env ?? {});
   if (account.cli === 'codex') {
     const sandbox = account.mode === 'edit-in-project' ? 'workspace-write' : 'read-only';
     // The task goes in on stdin ("-"), so no user text ever passes through cmd.exe.
-    const args = ['exec', '-s', sandbox, '-C', cwd, '--skip-git-repo-check', '--color', 'never', '-o', outFile, '-'];
+    const extra = sandbox === 'workspace-write' ? linkedNodeModules(cwd) : null;
+    const args = ['exec', '-s', sandbox, '-C', cwd, ...(extra ? ['--add-dir', extra] : []), '--skip-git-repo-check', '--color', 'never', '-o', outFile, '-'];
     if (process.platform === 'win32') return { file: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', 'codex', ...args], env, stdin: true };
     return { file: 'codex', args, env, stdin: true };
   }
@@ -72,7 +88,17 @@ function killTree(child) {
   try { child.kill(); } catch { /* ignore */ }
 }
 
-export function runHelper({ config, kind, task, cwd, spawn = cp.spawn, timeoutMs = HELPER_TIMEOUT_MS, tmpDir = os.tmpdir() }) {
+// Headless Gemini sometimes ends with no answer at all; one retry usually works.
+export async function runHelper(opts) {
+  try {
+    return await runOnce(opts);
+  } catch (e) {
+    if (opts.kind !== 'gemini' || !/δεν έδωσε απάντηση/.test(e.message)) throw e;
+    return runOnce(opts);
+  }
+}
+
+function runOnce({ config, kind, task, cwd, spawn = cp.spawn, timeoutMs = HELPER_TIMEOUT_MS, tmpDir = os.tmpdir() }) {
   return new Promise((resolve, reject) => {
     if (typeof task !== 'string' || !task.trim()) return reject(new Error('Λείπει η εργασία (task)'));
     let account;

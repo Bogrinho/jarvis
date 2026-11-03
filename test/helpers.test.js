@@ -137,3 +137,37 @@ test('codex gets the helper rules before the task', async () => {
   assert.match(calls[0].stdin, /Do not commit/);
   assert.ok(calls[0].stdin.endsWith('do x'));
 });
+
+test('codex may write to a node_modules that links outside the folder', () => {
+  const c = config();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jv-proj-'));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'jv-mods-'));
+  fs.symlinkSync(target, path.join(dir, 'node_modules'), 'junction');
+  const l = helperLaunch(c.accounts.mine, dir, 'o.txt');
+  const i = l.args.indexOf('--add-dir');
+  assert.ok(i > 0, 'has --add-dir');
+  assert.equal(fs.realpathSync(l.args[i + 1]), fs.realpathSync(target));
+  // a normal node_modules folder, or a read-only account, adds nothing
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'jv-plain-'));
+  fs.mkdirSync(path.join(plain, 'node_modules'));
+  assert.ok(!helperLaunch(c.accounts.mine, plain, 'o.txt').args.includes('--add-dir'));
+  assert.ok(!helperLaunch({ ...c.accounts.mine, mode: 'cautious' }, dir, 'o.txt').args.includes('--add-dir'));
+});
+
+test('an empty gemini answer is retried once', async () => {
+  const c = config();
+  let n = 0;
+  const spawn = () => {
+    n++;
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new Writable({ write(_c, _e, cb) { cb(); } });
+    child.kill = () => {};
+    setTimeout(() => { if (n === 2) child.stdout.write('second time works'); child.emit('close', 0); }, 10);
+    return child;
+  };
+  const r = await runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn });
+  assert.equal(r.answer, 'second time works');
+  assert.equal(n, 2);
+});
