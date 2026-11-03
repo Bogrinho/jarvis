@@ -17,21 +17,31 @@ const rotZ = (p, a) => [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin
 
 // how each shape spins, how white it glows, whether it draws constellation lines
 const STYLE = {
-  claude: { spin: (p, a) => rotX(rotY(p, a), 0.35), white: 0.35, lines: 1 },
+  claude: { spin: (p, a) => rotX(rotZ(p, a * 0.35), 0.18), white: 0.45, lines: 0 },
   work: { spin: (p, a) => rotX(rotZ(p, -a * 1.6), 0.25), white: 0.75, lines: 0 },
-  mine: { spin: (p, a) => rotX(rotY(p, a * 1.4), 1.05), white: 0.4, lines: 0 },
+  mine: { spin: (p, a) => rotX(rotZ(p, -a * 1.6), 0.25), white: 0.75, lines: 0 },
   gemini: { spin: (p, a) => rotZ(p, a * 0.6), white: 0.5, lines: 0 },
 };
 
+// Fixed ray lengths (not random) so the burst keeps the same silhouette every load.
+const RAYS = [1.0, 0.82, 0.94, 0.78, 0.98, 0.86, 0.92, 0.8, 1.02, 0.84, 0.9, 0.79];
+function burstPoint(i) {
+  const k = i % RAYS.length;
+  const ang = (k / RAYS.length) * TAU + 0.12 * Math.sin(k * 2.3);
+  const len = RAYS[k];
+  const start = 0.16;
+  const d = start + Math.pow(rnd(), 0.85) * (len - start);
+  const t = (d - start) / (len - start); // 0 at the centre end, 1 at the tip
+  const half = 0.05 * Math.sin(Math.PI * Math.min(1, 0.2 + t * 0.85)) + 0.018; // rounded ends, fuller middle
+  const w = (rnd() + rnd() - 1) * half; // denser along the middle of each ray
+  return [Math.cos(ang) * d - Math.sin(ang) * w, Math.sin(ang) * d + Math.cos(ang) * w, gauss() * 0.025];
+}
+
 function buildShapes(N) {
   const S = { claude: [], work: [], mine: [], gemini: [] };
-  const ga = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < N; i++) {
-    // Claude: constellation sphere
-    const y = 1 - (i / (N - 1)) * 2;
-    const r = Math.sqrt(1 - y * y);
-    const t = ga * i;
-    S.claude.push([Math.cos(t) * r, y, Math.sin(t) * r]);
+    // Claude: a radiant burst like its icon: 12 rounded rays of uneven length around a small open centre
+    S.claude.push(burstPoint(i));
     // Codex work: two-arm spiral galaxy with a bright core
     if (i < N * 0.12) {
       const k = 0.1;
@@ -44,12 +54,8 @@ function buildShapes(N) {
       const sp = 0.015 + 0.035 * d;
       S.work.push([Math.cos(a) * rr + gauss() * sp, Math.sin(a) * rr + gauss() * sp, gauss() * 0.02]);
     }
-    // Codex personal: ring
-    const u = rnd() * TAU;
-    const v = rnd() * TAU;
-    const R0 = 0.78;
-    const r0 = 0.16 * (0.6 + rnd() * 0.4);
-    S.mine.push([(R0 + r0 * Math.cos(v)) * Math.cos(u), r0 * Math.sin(v), (R0 + r0 * Math.cos(v)) * Math.sin(u)]);
+    // Codex personal: the same two-arm spiral galaxy
+    S.mine.push(S.work[i].slice());
     // Gemini: four-pointed star
     const ray = i % 4;
     const dd = Math.pow(rnd(), 0.9);
