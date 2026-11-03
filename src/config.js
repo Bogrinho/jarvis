@@ -123,9 +123,20 @@ export function loadConfig(filePath) {
     prompt: str(q?.prompt, `quickCommands[${i}].prompt`),
   }));
 
+  // Optional: the user's SiteWatch status page (read with a key kept in a local file).
+  let sitewatch = null;
+  if (raw.sitewatch != null) {
+    const u = str(raw.sitewatch.url, 'sitewatch.url');
+    let parsed;
+    try { parsed = new URL(u); } catch { throw new ConfigError('sitewatch.url must be a valid address'); }
+    if (parsed.protocol !== 'https:') throw new ConfigError('sitewatch.url must use https');
+    sitewatch = { url: parsed.origin, tokenFile: resolve(str(raw.sitewatch.tokenFile, 'sitewatch.tokenFile')) };
+  }
+
   return {
     rootDir,
     port,
+    sitewatch,
     accounts,
     projects,
     quickCommands,

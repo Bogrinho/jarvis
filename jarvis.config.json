@@ -40,5 +40,6 @@
     { "id": "code-review", "label": "Code Review", "prompt": "Review the recent changes in this project and list issues; check today.md for related tasks." },
     { "id": "new-project", "label": "New Project", "prompt": "Help me scaffold a new project; use today.md for context on current priorities." }
   ],
-  "directivesFile": "vault/today.md"
+  "directivesFile": "vault/today.md",
+  "sitewatch": { "url": "https://sitewatch-live.stathisbogris.workers.dev", "tokenFile": "data/sitewatch-token.txt" }
 }

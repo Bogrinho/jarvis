@@ -254,6 +254,36 @@ function renderDirectives() {
   for (const d of list) ul.append(el('li', { class: d.done ? 'done' : '', text: d.text }));
 }
 
+// ---------- SiteWatch (the user's monitored websites) ----------
+const SW_NOTE = {
+  loading: 'Φόρτωση…',
+  'no-token': 'Λείπει το κλειδί του SiteWatch.',
+  'bad-token': 'Το κλειδί δεν ταιριάζει με το SiteWatch.',
+  disabled: 'Το SiteWatch δεν έχει ακόμα ενεργό κλειδί.',
+  error: 'Το SiteWatch δεν απαντάει τώρα.',
+};
+const swMs = (v) => (Number.isFinite(v) ? `${Math.round(v)} ms` : '—');
+const swPct = (v) => (Number.isFinite(v) ? `${v.toFixed(v >= 99.95 ? 0 : 1)}%` : '—');
+function renderSites() {
+  const sw = S.sitewatch ?? { state: 'off' };
+  $('sw').hidden = sw.state === 'off';
+  const box = $('sites');
+  box.replaceChildren();
+  if (sw.state !== 'ok') {
+    box.append(el('p', { class: 'sw-note', text: SW_NOTE[sw.state] ?? SW_NOTE.error }));
+    return;
+  }
+  if (!sw.monitors.length) { box.append(el('p', { class: 'sw-note', text: 'Δεν υπάρχουν sites στο SiteWatch.' })); return; }
+  for (const m of sw.monitors) {
+    const status = ['up', 'degraded', 'down'].includes(m.status) ? m.status : 'unknown';
+    const ssl = Number.isFinite(m.ssl_days_remaining) ? `SSL ${m.ssl_days_remaining} ημ.` : 'SSL —';
+    box.append(el('div', { class: `site s-${status}`, title: `${m.host ?? ''} · ${status}` },
+      el('div', { class: 'site-top' }, el('i', { class: 'site-dot', 'aria-hidden': 'true' }), el('b', { text: m.name ?? m.host ?? '—' }),
+        el('span', { class: 'site-ms', text: swMs(m.response_time_ms) })),
+      el('div', { class: 'site-sub', text: `διάμεσος ${swMs(m.median_response_ms)} · διαθ. ${swPct(m.uptime_percentage)} · ${ssl}` })));
+  }
+}
+
 function renderSkills() {
   const box = $('skills');
   box.replaceChildren();
@@ -785,6 +815,9 @@ function onMessage(ev) {
     case 'usage':
       if (msg.usage && typeof msg.usage === 'object') { S.usage = msg.usage; renderVitals(); }
       break;
+    case 'sitewatch':
+      if (msg.sitewatch && typeof msg.sitewatch === 'object') { S.sitewatch = msg.sitewatch; renderSites(); }
+      break;
     case 'directives':
       if (Array.isArray(msg.list)) { S.directives = msg.list; renderDirectives(); }
       break;
@@ -896,6 +929,8 @@ async function boot() {
   S.jobs = Array.isArray(state.jobs) ? state.jobs : [];
   S.usage = state.usage && typeof state.usage === 'object' ? state.usage : {};
   S.directives = Array.isArray(state.directives) ? state.directives : [];
+  S.sitewatch = state.sitewatch && typeof state.sitewatch === 'object' ? state.sitewatch : { state: 'off' };
+  renderSites();
 
   if (!account(S.selected)) S.selected = (S.accounts.find((a) => a.enabled) ?? S.accounts[0])?.id ?? 'claude';
   renderSwitcher();

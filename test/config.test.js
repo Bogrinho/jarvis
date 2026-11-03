@@ -189,3 +189,18 @@ test('the old work folder stays marked as work so personal helpers never run the
   const w = c.projects.find((p) => p.side === 'work');
   assert.ok(w && /act-as-my-coding-agent-we$/.test(w.path));
 });
+
+test('sitewatch settings: https address and a token file inside data/', () => {
+  const c = loadConfig('jarvis.config.json');
+  assert.equal(new URL(c.sitewatch.url).protocol, 'https:');
+  assert.equal(c.sitewatch.tokenFile, path.join(c.rootDir, 'data', 'sitewatch-token.txt'));
+});
+
+test('a non-https sitewatch address is rejected', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jv-cfg-'));
+  const raw = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'jarvis.config.json'), 'utf8'));
+  raw.sitewatch = { url: 'http://x.example', tokenFile: 'data/t.txt' };
+  const f = path.join(dir, 'jarvis.config.json');
+  fs.writeFileSync(f, JSON.stringify(raw));
+  assert.throws(() => loadConfig(f), /sitewatch/);
+});

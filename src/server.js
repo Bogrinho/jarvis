@@ -13,6 +13,7 @@ import {
   perDayRate as defaultPerDayRate,
 } from './usage/history.js';
 import { readDirectives as defaultReadDirectives } from './directives.js';
+import { readSiteWatch as defaultReadSiteWatch } from './sitewatch.js';
 import { ChatError } from './chat/model.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -178,6 +179,8 @@ export function createServer({
     getSeries: deps.getSeries ?? defaultGetSeries,
     perDayRate: deps.perDayRate ?? defaultPerDayRate,
     readDirectives: deps.readDirectives ?? defaultReadDirectives,
+    readSiteWatch: deps.readSiteWatch ?? defaultReadSiteWatch,
+    siteWatchIntervalMs: deps.siteWatchIntervalMs ?? 120000,
     historyFile: deps.historyFile ?? path.join(config.rootDir, 'data', 'usage-history.json'),
     watch: deps.watch ?? fs.watch,
     log: deps.log ?? (() => {}),
@@ -189,6 +192,14 @@ export function createServer({
   const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
 
   let usage = {};
+  let sitewatch = { state: config.sitewatch ? 'loading' : 'off' };
+  let siteWatchTimer = null;
+  async function refreshSiteWatch() {
+    if (!config.sitewatch) return;
+    try { sitewatch = await d.readSiteWatch({ url: config.sitewatch.url, tokenFile: config.sitewatch.tokenFile }); }
+    catch { sitewatch = { state: 'error' }; }
+    broadcast({ type: 'sitewatch', sitewatch });
+  }
   let usageTimer = null;
   let refreshing = false;
   let lastDirectives = null; // JSON of the last list sent/served
@@ -274,6 +285,7 @@ export function createServer({
       jobs: jobs.list(),
       usage,
       directives,
+      sitewatch,
     };
   }
 
@@ -628,12 +640,16 @@ export function createServer({
           server.on('error', (e) => d.log(`server error: ${e.message}`));
           usageTimer = setInterval(refreshUsage, usageIntervalMs);
           usageTimer.unref?.();
+          if (config.sitewatch) {
+            siteWatchTimer = setInterval(refreshSiteWatch, d.siteWatchIntervalMs);
+            siteWatchTimer.unref?.();
+          }
           // Baseline the directives list first so only real edits are broadcast.
           readDirectivesSafe().then((list) => {
             lastDirectives ??= JSON.stringify(list);
             watchDirectives();
             refreshUsage();
-            resolve();
+            refreshSiteWatch().then(resolve, resolve);
           });
         });
       });
@@ -645,6 +661,7 @@ export function createServer({
     close() {
       closed = true;
       clearInterval(usageTimer);
+      clearInterval(siteWatchTimer);
       clearTimeout(directivesDebounce);
       try { directivesWatcher?.close(); } catch { /* already closed */ }
       directivesWatcher = null;

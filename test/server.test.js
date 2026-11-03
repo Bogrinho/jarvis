@@ -60,7 +60,7 @@ afterEach(async () => {
   current = [];
 });
 
-async function setup({ deps = {}, onShutdown = () => {} } = {}) {
+async function setup({ deps = {}, onShutdown = () => {}, edit = () => {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-server-'));
   const raw = JSON.parse(fs.readFileSync(repoConfig, 'utf8'));
   // Fixed homes so the tests don't depend on the user's own folders.
@@ -77,6 +77,7 @@ async function setup({ deps = {}, onShutdown = () => {} } = {}) {
     { name: 'personal-proj', path: personalPath, side: 'personal' },
   ];
   raw.port = await freePort();
+  edit(raw);
   const file = path.join(dir, 'jarvis.config.json');
   fs.writeFileSync(file, JSON.stringify(raw));
   const config = loadConfig(file);
@@ -468,4 +469,17 @@ test('upload refuses unknown terminals, bad names, path tricks and big files', a
   const big = await upload(ctx, `job=${job.id}&name=a.bin`, Buffer.alloc(26 * 1024 * 1024)).catch((e) => ({ status: e.code }));
   assert.ok([413, 'EPIPE', 'ECONNRESET'].includes(big.status), String(big.status));
   assert.equal((await upload(ctx, `job=${job.id}&name=a.png`, Buffer.from('x'), { 'x-jarvis-token': 'wrong' })).status, 403);
+});
+
+test('state includes SiteWatch status from the reader, without the key', async () => {
+  const ctx = await setup({ edit: (raw) => { raw.sitewatch = { url: 'https://sw.example.workers.dev', tokenFile: 'data/sitewatch-token.txt' }; }, deps: { readSiteWatch: async (o) => ({ state: 'ok', generated_at: 'g', monitors: [{ name: 'A', host: 'a.gr', status: 'up', response_time_ms: 120 }], _saw: o.tokenFile ? 'file' : 'none' }) } });
+  const r = await request(ctx, { path: '/api/state' });
+  assert.equal(r.json.sitewatch.state, 'ok');
+  assert.equal(r.json.sitewatch.monitors[0].host, 'a.gr');
+});
+
+test('state reports SiteWatch as off when it is not configured', async () => {
+  const ctx = await setup();
+  const r = await request(ctx, { path: '/api/state' });
+  assert.equal(r.json.sitewatch.state, 'off');
 });
