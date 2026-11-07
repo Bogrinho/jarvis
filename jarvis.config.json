@@ -5,7 +5,7 @@
       "label": "Codex Personal",
       "cli": "codex",
       "side": "personal",
-      "mode": "edit-in-project",
+      "mode": "auto",
       "home": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github",
       "env": { "CODEX_HOME": "C:\\Users\\stath\\.codex-personal" },
       "enabled": true
@@ -14,7 +14,7 @@
       "label": "Claude",
       "cli": "claude",
       "side": "personal",
-      "mode": "edit-in-project",
+      "mode": "auto",
       "home": ".",
       "env": {},
       "enabled": true
@@ -23,13 +23,14 @@
       "label": "Gemini",
       "cli": "agy",
       "side": "personal",
-      "mode": "edit-in-project",
+      "mode": "auto",
       "home": ".",
       "env": {},
       "enabled": true
     }
   },
   "projects": [
+    { "name": "TikTok Sale", "path": "C:\\Users\\stath\\Documents\\TikTok Sale", "side": "personal" },
     { "name": "Internships", "path": "C:\\Users\\stath\\Documents\\Internships", "side": "personal" },
     { "name": "Portfolio", "path": "C:\\Users\\stath\\Documents\\Portfolio", "side": "personal" },
     { "name": "SiteWatch", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\sitewatch-portfolio", "side": "personal" },

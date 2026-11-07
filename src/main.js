@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { JobManager } from './jobs.js';
 import { createServer } from './server.js';
+import { restoreJobs } from './restart.js';
 import { createChat } from './chat/setup.js';
 import { refreshWindowsPath } from './winpath.js';
 import { writeClaudeJarvisSettings, writeClaudeJarvisMcp } from './claude-settings.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noOpen = process.argv.includes('--no-open');
+const restored = process.argv.includes('--restored');
 
 refreshWindowsPath(); // find CLIs installed since login (e.g. agy via winget)
 const config = loadConfig(path.join(ROOT, 'jarvis.config.json'));
@@ -127,12 +129,20 @@ process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
 try {
-  await server.listen();
+  const deadline = Date.now() + 20000;
+  while (true) {
+    try { await server.listen(); break; }
+    catch (e) {
+      if (!restored || e?.code !== 'EADDRINUSE' || Date.now() >= deadline) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+  if (restored) await restoreJobs({ rootDir: config.rootDir, start: (job) => server.restoreJob(job), log });
   log(`listening on ${url}`);
   console.log(`Jarvis listening on ${url}`);
   openBrowser();
 } catch (e) {
-  if (e?.code === 'EADDRINUSE' && (await pingExisting())) {
+  if (!restored && e?.code === 'EADDRINUSE' && (await pingExisting())) {
     openBrowser();
     console.log('Jarvis already running');
     process.exit(0);

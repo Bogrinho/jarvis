@@ -16,6 +16,7 @@ import { readDirectives as defaultReadDirectives } from './directives.js';
 import { readSiteWatch as defaultReadSiteWatch } from './sitewatch.js';
 import { notify as defaultNotify } from './notify.js';
 import { ChatError } from './chat/model.js';
+import { relaunchJarvis, saveRestart } from './restart.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -188,6 +189,7 @@ export function createServer({
     log: deps.log ?? (() => {}),
     claudeSettingsFile: deps.claudeSettingsFile ?? null,
     claudeMcpFile: deps.claudeMcpFile ?? null,
+    relaunch: deps.relaunch ?? relaunchJarvis,
   };
   const port = config.port;
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -303,7 +305,7 @@ export function createServer({
     };
   }
 
-  function startJob(body) {
+  function startJob(body, restored = null) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'BAD_REQUEST');
     const { accountId, projectPath, useHome, prompt, quickCommandId } = body;
     if (typeof accountId !== 'string') throw new HttpError(400, 'BAD_REQUEST');
@@ -325,7 +327,8 @@ export function createServer({
       target = resolveTarget(config, { accountId, projectPath: projectPath || undefined, useHome: useHome === true });
     }
     const account = config.accounts[accountId];
-    const launch = buildLaunch(account, { claudeSettingsFile: d.claudeSettingsFile, claudeMcpFile: d.claudeMcpFile });
+    const launch = buildLaunch(account, { claudeSettingsFile: d.claudeSettingsFile, claudeMcpFile: d.claudeMcpFile, continueLast: !!restored });
+    if (restored) title = restored.title;
     if (!title) {
       const project = config.projects.find((p) => path.resolve(p.path).toLowerCase() === path.resolve(target.cwd).toLowerCase());
       title = jobPrompt ? jobPrompt.slice(0, 60) : `${account.label} · ${project ? project.name : 'home'}`;
@@ -493,6 +496,14 @@ export function createServer({
     if (chats && (pathname === '/api/chat-history' || pathname === '/api/chats' || pathname.startsWith('/api/chats/'))) {
       return handleChatApi(req, res, pathname);
     }
+    if (pathname === '/api/restart' && req.method === 'POST') {
+      await saveRestart(config.rootDir, jobs.list());
+      await d.relaunch();
+      await jobs.killAll();
+      try { await chats?.closeAll(); } catch (e) { d.log(`chat shutdown: ${e.message}`); }
+      res.once('finish', () => setImmediate(() => onShutdown()));
+      return send(res, 200, { ok: true });
+    }
     if (pathname === '/api/shutdown' && req.method === 'POST') {
       await jobs.killAll();
       try { await chats?.closeAll(); } catch (e) { d.log(`chat shutdown: ${e.message}`); }
@@ -645,6 +656,11 @@ export function createServer({
   jobs.on('exit', onJobChange);
 
   return {
+    restoreJob(saved) {
+      const account = Object.hasOwn(config.accounts, saved.accountId) ? config.accounts[saved.accountId] : null;
+      const useHome = !!account?.home && path.resolve(account.home).toLowerCase() === path.resolve(saved.cwd).toLowerCase();
+      return startJob({ accountId: saved.accountId, projectPath: saved.cwd, useHome }, saved);
+    },
     listen() {
       return new Promise((resolve, reject) => {
         const onError = (e) => reject(e);

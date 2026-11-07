@@ -248,6 +248,7 @@ function renderCard() {
 // ---------- directives + quick commands ----------
 function renderDirectives() {
   const ul = $('dir');
+  if (!ul) return; // the Directives card was removed from the page
   ul.replaceChildren();
   const list = S.directives.slice(0, 3);
   if (!list.length) ul.append(el('li', { class: 'empty', text: 'Κανένα directive στο today.md' }));
@@ -300,7 +301,8 @@ function forgetProject(accountId, code) {
 }
 
 // kind 'chat' -> a conversation (POST /api/chats); 'terminal' -> a terminal job (POST /api/jobs).
-const kindFor = (acc) => (canChat(acc) ? 'chat' : 'terminal');
+// The user chose terminals only, so Skills and Ask always open a terminal.
+const kindFor = () => 'terminal';
 
 async function startSession(kind, body, msgNode, button, onError) {
   showMsg(msgNode, '');
@@ -390,8 +392,10 @@ async function loadHistory(acc, folder, box) {
 function renderPicker() {
   const acc = selectedAccount();
   if (!acc) return;
-  const chat = canChat(acc) && P.mode === 'chat';
-  $('pickerMode').hidden = !canChat(acc);
+  // The user chose terminals only: the Chat/Terminal switch is hidden and Chat is never picked.
+  P.mode = 'terminal';
+  const chat = false;
+  $('pickerMode').hidden = true;
   for (const b of $('pickerMode').querySelectorAll('button')) {
     b.setAttribute('aria-pressed', String(b.dataset.mode === (chat ? 'chat' : 'terminal')));
   }
@@ -797,6 +801,7 @@ function renderStates() {
 let ws = null;
 let backoff = 500;
 let reconnectTimer = 0;
+let restarting = false;
 
 function setDown(down) {
   $('down').hidden = !down;
@@ -872,12 +877,14 @@ function connect() {
   sock.addEventListener('message', onMessage);
   sock.addEventListener('close', () => {
     if (ws !== sock) return;
+    if (restarting) return;
     $('conn').textContent = 'Reconnecting…';
     scheduleReconnect();
   });
 }
 
 async function scheduleReconnect() {
+  if (restarting) return;
   // Is the server there at all, and is it still the one that issued our token?
   let alive = false;
   try {
@@ -905,6 +912,29 @@ function tick() {
 }
 tick();
 setInterval(tick, 10000);
+
+$('restart').addEventListener('click', async () => {
+  if (!confirm('Επανεκκίνηση του Jarvis; Τα terminals θα ξανανοίξουν και θα συνεχίσουν τις συζητήσεις τους.')) return;
+  try { await api('POST', '/api/restart'); }
+  catch { alert('Η επανεκκίνηση απέτυχε.'); return; }
+  restarting = true;
+  clearTimeout(reconnectTimer);
+  setDown(true);
+  $('conn').textContent = 'Restarting…';
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const ping = await fetch('/api/ping', { cache: 'no-store', signal: AbortSignal.timeout(1000) });
+      if (!ping.ok || await ping.text() !== 'jarvis') continue;
+      try { await api('GET', '/api/state'); }
+      catch (e) { if (e.status === 403) { location.reload(); return; } }
+    } catch { /* server is still restarting */ }
+  }
+  $('conn').textContent = 'Restart timed out';
+  restarting = false;
+  scheduleReconnect();
+});
 
 $('shutdown').addEventListener('click', async () => {
   if (!confirm('Σταματάνε όλες οι δουλειές. Συνέχεια;')) return;

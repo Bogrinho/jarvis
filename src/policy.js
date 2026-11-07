@@ -15,20 +15,25 @@ const MODE_ARGS = {
   codex: {
     cautious: ['--ask-for-approval', 'on-request', '--sandbox', 'read-only'],
     'edit-in-project': ['--ask-for-approval', 'on-request', '--sandbox', 'workspace-write'],
+    // auto: an automatic reviewer approves requests (workspace-write sandbox).
+    auto: ['--approve-for-me'],
   },
   claude: {
     cautious: ['--permission-mode', 'default'],
     'edit-in-project': ['--permission-mode', 'acceptEdits'],
+    auto: ['--permission-mode', 'auto'],
   },
   gemini: {
     cautious: ['--approval-mode', 'default'],
     'edit-in-project': ['--approval-mode', 'auto_edit'],
+    auto: ['--approval-mode', 'auto_edit'],
   },
   // Antigravity CLI (Google's replacement for Gemini CLI on personal / AI Pro accounts).
   // No flag = asks before every tool; accept-edits = edits freely, still asks for commands.
   agy: {
     cautious: [],
     'edit-in-project': ['--mode', 'accept-edits'],
+    auto: ['--mode', 'auto'],
   },
 };
 
@@ -78,7 +83,7 @@ export function buildEnv(accountEnv) {
 
 // claudeSettingsFile: extra Claude Code settings (Jarvis's status line, which reports the
 // account's 5h / weekly limits to the usage panel). Only used for Claude.
-export function buildLaunch(account, { claudeSettingsFile, claudeMcpFile } = {}) {
+export function buildLaunch(account, { claudeSettingsFile, claudeMcpFile, continueLast = false } = {}) {
   const base = MODE_ARGS[account.cli]?.[account.mode];
   let modeArgs = base;
   if (base && account.cli === 'claude') {
@@ -90,6 +95,8 @@ export function buildLaunch(account, { claudeSettingsFile, claudeMcpFile } = {})
   if (account.cli === 'codex' && !account.env?.CODEX_HOME) {
     throw new PolicyError('NO_CODEX_HOME', `account ${account.id} has no CODEX_HOME`);
   }
+  if (continueLast && account.cli === 'claude') modeArgs = [...modeArgs, '--continue'];
+  if (continueLast && account.cli === 'codex') modeArgs = [...modeArgs, 'resume', '--last'];
   const env = buildEnv(account.env ?? {});
   if (process.platform === 'win32') {
     // npm installs .cmd shims on Windows, which must go through cmd.exe.

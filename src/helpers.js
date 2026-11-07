@@ -66,7 +66,7 @@ function linkedNodeModules(cwd) {
 export function helperLaunch(account, cwd, outFile) {
   const env = buildEnv(account.env ?? {});
   if (account.cli === 'codex') {
-    const sandbox = account.mode === 'edit-in-project' ? 'workspace-write' : 'read-only';
+    const sandbox = account.mode !== 'cautious' ? 'workspace-write' : 'read-only';
     // The task goes in on stdin ("-"), so no user text ever passes through cmd.exe.
     const extra = sandbox === 'workspace-write' ? linkedNodeModules(cwd) : null;
     const args = ['exec', '-s', sandbox, '-C', cwd, ...(extra ? ['--add-dir', extra] : []), '--skip-git-repo-check', '--color', 'never', '-o', outFile, '-'];
@@ -74,7 +74,7 @@ export function helperLaunch(account, cwd, outFile) {
     return { file: 'codex', args, env, stdin: true };
   }
   if (account.cli === 'agy') {
-    const mode = account.mode === 'edit-in-project' ? ['--mode', 'accept-edits'] : [];
+    const mode = account.mode !== 'cautious' ? ['--mode', 'accept-edits'] : [];
     // agy is a real .exe: Node passes the task as one argument, no shell involved.
     return { file: 'agy', args: [...mode, '--output-format', 'text', '-p'], env, stdin: false, promptArg: true };
   }

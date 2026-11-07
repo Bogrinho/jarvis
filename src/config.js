@@ -11,7 +11,7 @@ export class ConfigError extends Error {
 
 const CLIS = ['codex', 'claude', 'gemini', 'agy'];
 const SIDES = ['work', 'personal'];
-const MODES = ['cautious', 'edit-in-project'];
+const MODES = ['cautious', 'edit-in-project', 'auto'];
 const COLORS = { work: '#5b8cff', mine: '#5fd39a', claude: '#e0609a', gemini: '#a98bff' };
 const FALLBACK_COLOR = '#8a93a6';
 
@@ -39,7 +39,10 @@ function isWithin(child, parent) {
 }
 
 export function loadConfig(filePath) {
-  const abs = path.resolve(filePath);
+  let abs = path.resolve(filePath);
+  // Expand Windows short names (e.g. 53DB~1 -> Έγγραφα) so "." homes match the
+  // folder Claude Code uses for its saved conversations.
+  try { abs = fs.realpathSync.native(abs); } catch {}
   const rootDir = path.dirname(abs);
   let raw;
   try {

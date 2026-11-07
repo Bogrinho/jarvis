@@ -517,3 +517,31 @@ test('SiteWatch notifies only when a known monitor changes up state', async () =
     { title: 'Jarvis: Το site ξαναλειτουργεί', body: 'Site (example.com)' },
   ]);
 });
+
+test('restart saves open jobs and invokes relaunch and shutdown', async () => {
+  let relaunched = 0;
+  let shutdown = 0;
+  const ctx = await setup({ deps: { relaunch: async () => { relaunched++; } }, onShutdown: () => { shutdown++; } });
+  const job = (await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'claude' } })).json;
+  const forbidden = await request(ctx, { method: 'POST', path: '/api/restart', headers: { 'x-jarvis-token': undefined } });
+  assert.equal(forbidden.status, 403);
+  const response = await request(ctx, { method: 'POST', path: '/api/restart' });
+  assert.equal(response.status, 200);
+  await until(() => shutdown === 1);
+  assert.equal(relaunched, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ctx.dir, 'data', 'restart.json'), 'utf8')), [
+    { accountId: job.accountId, cwd: job.cwd, title: job.title },
+  ]);
+  assert.equal(ctx.calls[0].killed, true);
+});
+
+test('restored jobs use the normal job path and resume the saved account and folder', async () => {
+  const ctx = await setup();
+  const saved = { accountId: 'claude', cwd: ctx.personalPath, title: 'Saved terminal' };
+  ctx.server.restoreJob(saved);
+  assert.equal(ctx.calls[0].opts.cwd, saved.cwd);
+  assert.ok(ctx.calls[0].args.includes('--continue'));
+  assert.equal(ctx.jobs.list()[0].title, saved.title);
+  ctx.server.restoreJob({ accountId: 'mine', cwd: ctx.personalPath, title: 'Codex' });
+  assert.deepEqual(ctx.calls[1].args.slice(-2), ['resume', '--last']);
+});

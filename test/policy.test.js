@@ -178,3 +178,14 @@ test('claude launched by Jarvis gets the helpers MCP config', () => {
   assert.equal(l.args[i + 1], 'm.json');
   assert.ok(!buildLaunch(cfg.accounts.mine, { claudeMcpFile: 'm.json' }).args.includes('--mcp-config'));
 });
+
+test('continue last uses each CLI resume syntax only when requested', () => {
+  const { cfg } = makeConfig();
+  const claude = buildLaunch(cfg.accounts.claude);
+  const resumedClaude = buildLaunch(cfg.accounts.claude, { continueLast: true });
+  assert.deepEqual(resumedClaude.args, [...claude.args, '--continue']);
+  const codex = buildLaunch(cfg.accounts.mine);
+  const resumedCodex = buildLaunch(cfg.accounts.mine, { continueLast: true });
+  assert.deepEqual(resumedCodex.args, [...codex.args, 'resume', '--last']);
+  assert.deepEqual(buildLaunch(cfg.accounts.gemini, { continueLast: true }).args, buildLaunch(cfg.accounts.gemini).args);
+});
