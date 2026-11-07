@@ -30,8 +30,33 @@ function log(msg) {
 
 const url = `http://127.0.0.1:${config.port}/`;
 
+// Open Jarvis in its own app window (no tabs, no address bar) via Edge or Chrome "--app" mode.
+// Falls back to the default browser if neither is installed.
+function findAppBrowser() {
+  const bases = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
+  const exes = ['Microsoft\\Edge\\Application\\msedge.exe', 'Google\\Chrome\\Application\\chrome.exe'];
+  for (const exe of exes) {
+    for (const base of bases) {
+      const p = path.join(base, exe);
+      if (fs.existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+
 function openBrowser() {
   if (noOpen) return;
+  const appBrowser = findAppBrowser();
+  if (appBrowser) {
+    try {
+      const child = spawn(appBrowser, [`--app=${url}`, '--window-size=1400,900'], { detached: true, stdio: 'ignore' });
+      child.on('error', (e) => log(`open app window failed: ${e.message}`));
+      child.unref();
+      return;
+    } catch (e) {
+      log(`open app window failed: ${e.message}`);
+    }
+  }
   try {
     const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `start "" "${url}"`], {
       detached: true, stdio: 'ignore', windowsVerbatimArguments: true, windowsHide: true,
