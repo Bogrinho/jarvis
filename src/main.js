@@ -44,14 +44,36 @@ function findAppBrowser() {
   return null;
 }
 
+// Edge/Chrome remember the last app-window size and ignore --start-maximized, so wait for the
+// "Jarvis" browser window (class Chrome_WidgetWin_1) and maximize it like the □ button does.
+function maximizeAppWindow() {
+  const script = `
+Add-Type -Namespace J -Name W -MemberDefinition '[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);'
+for ($i = 0; $i -lt 40; $i++) {
+  $h = [J.W]::FindWindow('Chrome_WidgetWin_1', 'Jarvis')
+  if ($h -ne [IntPtr]::Zero) { [J.W]::ShowWindow($h, 3) > $null; break }
+  Start-Sleep -Milliseconds 250
+}`;
+  try {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], {
+      detached: true, stdio: 'ignore', windowsHide: true,
+    });
+    child.on('error', (e) => log(`maximize failed: ${e.message}`));
+    child.unref();
+  } catch (e) {
+    log(`maximize failed: ${e.message}`);
+  }
+}
+
 function openBrowser() {
   if (noOpen) return;
   const appBrowser = findAppBrowser();
   if (appBrowser) {
     try {
-      const child = spawn(appBrowser, [`--app=${url}`, '--window-size=1400,900'], { detached: true, stdio: 'ignore' });
+      const child = spawn(appBrowser, [`--app=${url}`, '--start-maximized'], { detached: true, stdio: 'ignore' });
       child.on('error', (e) => log(`open app window failed: ${e.message}`));
       child.unref();
+      maximizeAppWindow();
       return;
     } catch (e) {
       log(`open app window failed: ${e.message}`);

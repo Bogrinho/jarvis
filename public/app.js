@@ -910,6 +910,8 @@ $('shutdown').addEventListener('click', async () => {
   if (!confirm('Σταματάνε όλες οι δουλειές. Συνέχεια;')) return;
   try { await api('POST', '/api/shutdown'); } catch { /* already gone */ }
   setDown(true);
+  // Close the Jarvis app window too (works in the --app window; a normal tab may refuse).
+  window.close();
 });
 
 // ---------- boot ----------
