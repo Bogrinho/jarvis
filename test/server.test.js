@@ -221,6 +221,13 @@ test('serves index.html with the token injected', async () => {
   assert.ok(r.text.includes(`<meta name="jarvis-token" content="${TOKEN}">`));
 });
 
+test('serves the Jarvis icon', async () => {
+  const ctx = await setup();
+  const r = await request(ctx, { path: '/jarvis.ico' });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers['content-type'], 'image/x-icon');
+});
+
 test('serves xterm vendor files', async () => {
   const ctx = await setup();
   const r = await request(ctx, { path: '/vendor/xterm/xterm/lib/xterm.js' });
@@ -482,4 +489,31 @@ test('state reports SiteWatch as off when it is not configured', async () => {
   const ctx = await setup();
   const r = await request(ctx, { path: '/api/state' });
   assert.equal(r.json.sitewatch.state, 'off');
+});
+
+
+test('SiteWatch notifies only when a known monitor changes up state', async () => {
+  let status = 'up';
+  let state = 'ok';
+  const notices = [];
+  const ctx = await setup({
+    edit: (raw) => { raw.sitewatch = { url: 'https://sw.example.workers.dev', tokenFile: 'data/sitewatch-token.txt' }; },
+    deps: { notify: (n) => notices.push(n), readSiteWatch: async () => state === 'ok' ? { state, monitors: [{ name: 'Site', host: 'example.com', status }] } : { state } },
+  });
+  assert.deepEqual(notices, []);
+  await ctx.server.refreshSiteWatch();
+  status = 'degraded';
+  await ctx.server.refreshSiteWatch();
+  status = 'down';
+  await ctx.server.refreshSiteWatch();
+  state = 'error';
+  await ctx.server.refreshSiteWatch();
+  state = 'ok';
+  status = 'up';
+  await ctx.server.refreshSiteWatch();
+  await ctx.server.refreshSiteWatch();
+  assert.deepEqual(notices, [
+    { title: 'Jarvis: Το site έπεσε', body: 'Site (example.com)' },
+    { title: 'Jarvis: Το site ξαναλειτουργεί', body: 'Site (example.com)' },
+  ]);
 });

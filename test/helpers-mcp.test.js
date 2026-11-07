@@ -9,9 +9,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 test('mcp: initialize, list tools, call a tool, report errors', async () => {
   const runs = [];
+  const notices = [];
   const handle = createMcpHandler({
     config: { accounts: {}, projects: [] },
     cwd: 'C:/proj',
+    notify: (notice) => notices.push(notice),
     run: async (o) => { runs.push(o); if (o.task === 'boom') throw new Error('kaput'); return { account: 'Codex Personal', answer: 'ok!' }; },
   });
   const init = await handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
@@ -27,6 +29,10 @@ test('mcp: initialize, list tools, call a tool, report errors', async () => {
   const bad = await handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'ask_codex', arguments: { task: 'boom' } } });
   assert.equal(bad.result.isError, true);
   assert.match(bad.result.content[0].text, /kaput/);
+  assert.deepEqual(notices, [
+    { title: 'Jarvis: Ο Gemini τελείωσε', body: 'hi' },
+    { title: 'Jarvis: Ο Codex σταμάτησε με σφάλμα', body: 'boom' },
+  ]);
   assert.equal((await handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'rm_rf' } })).error.code, -32602);
   assert.equal((await handle({ jsonrpc: '2.0', id: 6, method: 'nope' })).error.code, -32601);
 });
@@ -51,4 +57,12 @@ test('mcp initialize tells the leader how the team works', async () => {
   assert.match(init.result.instructions, /leader/i);
   assert.match(init.result.instructions, /ask_codex/);
   assert.match(init.result.instructions, /ask_gemini/);
+});
+
+
+test('mcp reports nonzero helper exit as a notification failure', async () => {
+  const notices = [];
+  const handle = createMcpHandler({ config: {}, cwd: '.', notify: (n) => notices.push(n), run: async () => ({ account: 'Codex', answer: 'failed', exitCode: 1 }) });
+  await handle({ id: 1, method: 'tools/call', params: { name: 'ask_codex', arguments: { task: 'x'.repeat(170) } } });
+  assert.deepEqual(notices, [{ title: 'Jarvis: Ο Codex σταμάτησε με σφάλμα', body: 'x'.repeat(150) }]);
 });

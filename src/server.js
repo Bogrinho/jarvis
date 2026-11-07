@@ -14,6 +14,7 @@ import {
 } from './usage/history.js';
 import { readDirectives as defaultReadDirectives } from './directives.js';
 import { readSiteWatch as defaultReadSiteWatch } from './sitewatch.js';
+import { notify as defaultNotify } from './notify.js';
 import { ChatError } from './chat/model.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -180,7 +181,8 @@ export function createServer({
     perDayRate: deps.perDayRate ?? defaultPerDayRate,
     readDirectives: deps.readDirectives ?? defaultReadDirectives,
     readSiteWatch: deps.readSiteWatch ?? defaultReadSiteWatch,
-    siteWatchIntervalMs: deps.siteWatchIntervalMs ?? 120000,
+    notify: deps.notify ?? defaultNotify,
+    siteWatchIntervalMs: deps.siteWatchIntervalMs ?? 3600000, // once an hour
     historyFile: deps.historyFile ?? path.join(config.rootDir, 'data', 'usage-history.json'),
     watch: deps.watch ?? fs.watch,
     log: deps.log ?? (() => {}),
@@ -194,10 +196,22 @@ export function createServer({
   let usage = {};
   let sitewatch = { state: config.sitewatch ? 'loading' : 'off' };
   let siteWatchTimer = null;
+  const siteWatchStatuses = new Map();
   async function refreshSiteWatch() {
     if (!config.sitewatch) return;
     try { sitewatch = await d.readSiteWatch({ url: config.sitewatch.url, tokenFile: config.sitewatch.tokenFile }); }
     catch { sitewatch = { state: 'error' }; }
+    if (sitewatch?.state === 'ok' && Array.isArray(sitewatch.monitors)) {
+      for (const monitor of sitewatch.monitors) {
+        const key = monitor.host || monitor.name;
+        if (!key) continue;
+        const up = monitor.status === 'up';
+        if (siteWatchStatuses.has(key) && siteWatchStatuses.get(key) !== up) {
+          try { d.notify({ title: up ? 'Jarvis: Το site ξαναλειτουργεί' : 'Jarvis: Το site έπεσε', body: `${monitor.name ?? ''} (${monitor.host ?? ''})` }); } catch { /* ignore notification failures */ }
+        }
+        siteWatchStatuses.set(key, up);
+      }
+    }
     broadcast({ type: 'sitewatch', sitewatch });
   }
   let usageTimer = null;
@@ -658,6 +672,7 @@ export function createServer({
       return server.address();
     },
     refreshUsage,
+    refreshSiteWatch,
     close() {
       closed = true;
       clearInterval(usageTimer);

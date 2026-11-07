@@ -1,3 +1,5 @@
+import { notify as defaultNotify } from './notify.js';
+
 // A tiny MCP server (JSON-RPC over stdio, one message per line) that gives a leader AI
 // (Claude) two tools: ask_codex and ask_gemini. Each runs the helper once in the leader's
 // folder and returns its final answer.
@@ -39,7 +41,7 @@ const INSTRUCTIONS =
   'goal, files, what "done" means and checks to run. Always verify their work yourself (git diff, tests) before ' +
   'reporting it as done. Do small edits yourself. Helpers never commit; you commit only when the user asks.';
 
-export function createMcpHandler({ config, cwd, run }) {
+export function createMcpHandler({ config, cwd, run, notify = defaultNotify }) {
   return async function handle(msg) {
     if (!msg || typeof msg !== 'object') return null;
     const { id, method, params } = msg;
@@ -61,10 +63,17 @@ export function createMcpHandler({ config, cwd, run }) {
         const name = params?.name;
         const kind = name === 'ask_codex' ? 'codex' : name === 'ask_gemini' ? 'gemini' : null;
         if (!kind) return fail(-32602, `unknown tool ${name}`);
+        const task = params?.arguments?.task;
+        const finished = (failed) => {
+          const helper = kind === 'codex' ? 'Codex' : 'Gemini';
+          try { notify({ title: `Jarvis: Ο ${helper} ${failed ? 'σταμάτησε με σφάλμα' : 'τελείωσε'}`, body: typeof task === 'string' ? Array.from(task).slice(0, 150).join('') : '' }); } catch { /* ignore notification failures */ }
+        };
         try {
-          const r = await run({ config, kind, task: params?.arguments?.task, cwd });
+          const r = await run({ config, kind, task, cwd });
+          finished(r.exitCode != null && r.exitCode !== 0);
           return reply({ content: [{ type: 'text', text: `[${r.account}]\n${r.answer}` }] });
         } catch (e) {
+          finished(true);
           return reply({ content: [{ type: 'text', text: `Σφάλμα: ${e.message}` }], isError: true });
         }
       }
