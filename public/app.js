@@ -672,7 +672,11 @@ function focusJob(id, open = false) {
   const pane = panes.get(id);
   if (pane && dockOpen()) {
     pane.node.scrollIntoView({ block: 'nearest' });
-    if (pane.kind === 'chat') pane.view.focus(); else pane.term?.focus();
+    if (pane.kind === 'chat') pane.view.focus();
+    else {
+      pane.activate();
+      pane.term?.focus();
+    }
   }
 }
 
@@ -689,6 +693,55 @@ function sendWs(msg) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+function terminalComposer(sendInput) {
+  const input = el('textarea', { rows: 1, 'aria-label': 'Κείμενο για το τερματικό', placeholder: 'Γράψε εδώ…', enterkeyhint: 'send' });
+  function grow() {
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 2 + 'px';
+    requestAnimationFrame(fitAll);
+  }
+  const mic = voice.button(text => {
+    input.value = appendSpeech(input.value, text);
+    grow();
+  });
+  let submitting = false;
+  function submit() {
+    if (submitting || ws?.readyState !== WebSocket.OPEN) return;
+    submitting = true;
+    const socket = ws;
+    if (input.value) sendInput(input.value);
+    input.value = '';
+    grow();
+    setTimeout(() => {
+      if (ws === socket && input.isConnected) sendInput('\r');
+      submitting = false;
+    }, 100);
+  }
+  input.addEventListener('input', grow);
+  let shiftEnter = false;
+  input.addEventListener('keydown', e => {
+    shiftEnter = e.key === 'Enter' && e.shiftKey;
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      if (!e.repeat) submit();
+    }
+  });
+  input.addEventListener('keyup', () => { shiftEnter = false; });
+  input.addEventListener('blur', () => { shiftEnter = false; });
+  // Some soft keyboards report only the text-editing event for Enter.
+  input.addEventListener('beforeinput', e => {
+    if (e.inputType === 'insertLineBreak' && e.cancelable && !e.isComposing && !shiftEnter) {
+      e.preventDefault();
+      submit();
+    }
+  });
+  const send = el('button', { type: 'button', text: 'Αποστολή', 'aria-label': 'Αποστολή', onclick: submit });
+  const keys = [['Esc', '\x1b'], ['Tab', '\t'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['Ctrl+C', '\x03']];
+  const bar = el('div', { class: 'term-compose' }, el('div', {}, input, mic, send),
+    el('div', {}, ...keys.map(([text, data]) => el('button', { type: 'button', text, onclick: () => sendInput(data) }))));
+  return { bar, mic };
+}
+
 function createPane(job, maximize) {
   const acc = account(job.accountId);
   const color = safeColor(acc?.color);
@@ -700,14 +753,15 @@ function createPane(job, maximize) {
   const picker = el('input', { type: 'file', multiple: true, hidden: true });
   const host = el('div', { class: 'xt' });
   const sendInput = data => sendWs({ type: 'input', id: job.id, data });
-  const mic = voice.button((text, continued) => sendInput((continued ? ' ' : '') + text));
+  const composer = window.matchMedia('(pointer: coarse)').matches ? terminalComposer(sendInput) : null;
+  const mic = composer ? composer.mic : voice.button((text, continued) => sendInput((continued ? ' ' : '') + text));
   const node = el('div', { class: 'term', style: { '--c': color, '--c-rgb': rgb } },
     el('header', {},
       el('span', { class: 'l' }, el('i', { class: 'dot', 'aria-hidden': 'true' }), title),
-      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, attach, mic, maximize, close, picker)),
+      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, attach, !composer && mic, maximize, close, picker)),
     el('div', { class: 'beam', 'aria-hidden': 'true' }),
-    host);
-  node.addEventListener('mousedown', () => { if (S.focused !== job.id) focusJob(job.id); });
+    host, composer?.bar);
+  node.addEventListener('mousedown', () => { if (!composer && S.focused !== job.id) focusJob(job.id); });
   close.addEventListener('click', () => closeSession(job.id));
 
   let term = null;
@@ -715,7 +769,7 @@ function createPane(job, maximize) {
   if (typeof window.Terminal === 'function') {
     term = new window.Terminal({
       fontFamily: '"Cascadia Mono", "SFMono-Regular", Consolas, monospace',
-      fontSize: 13,
+      fontSize: window.matchMedia('(max-width: 520px)').matches ? 12 : 13,
       lineHeight: 1.3,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -744,6 +798,10 @@ function createPane(job, maximize) {
       term.loadAddon(fit);
     }
     term.open(host);
+    if (composer && term.textarea) {
+      term.textarea.readOnly = true;
+      term.textarea.inputMode = 'none';
+    }
     enableClipboard(term, host);
     enableFiles(term, node, host, attach, picker, job.id);
     term.onData(sendInput);
@@ -751,7 +809,18 @@ function createPane(job, maximize) {
   } else {
     host.textContent = 'xterm.js failed to load';
   }
-  const pane = { kind: 'terminal', node, term, fit, title, stateEl, mic, attached: false };
+  function activate() {
+    if (!term || !host.clientWidth || !host.clientHeight) return;
+    fit?.fit();
+    sendWs({ type: 'active', id: job.id, cols: term.cols, rows: term.rows });
+  }
+  for (const event of ['pointerdown', 'touchstart', 'keydown', 'focusin']) {
+    node.addEventListener(event, () => {
+      if ((composer || event === 'focusin' || event === 'keydown') && S.focused !== job.id) selectJob(job.id);
+      activate();
+    }, { capture: true, passive: true });
+  }
+  const pane = { kind: 'terminal', node, term, fit, activate, title, stateEl, mic, attached: false };
   panes.set(job.id, pane);
   return pane;
 }
@@ -1070,8 +1139,10 @@ function onMessage(ev) {
   }
 }
 
-function reportFocus() {
-  sendWs({ type: 'focus', focused: !document.hidden && document.hasFocus() });
+function reportFocus(event) {
+  const focused = !document.hidden && document.hasFocus();
+  sendWs({ type: 'focus', focused });
+  if (event && focused) panes.get(S.focused)?.activate?.();
 }
 window.addEventListener('focus', reportFocus);
 window.addEventListener('blur', reportFocus);

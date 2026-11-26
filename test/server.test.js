@@ -142,6 +142,59 @@ test('binds to 127.0.0.1 only', async () => {
   assert.equal(ctx.server.address().address, '127.0.0.1');
 });
 
+test('remote HTTP and WebSocket share the identity and origin checks', async () => {
+  const host = 'pc.tail.ts.net';
+  const ctx = await setup({ edit(raw) { raw.remote = { enabled: true, host, allowedUsers: ['Owner@example.com'] }; } });
+  const remote = { host, origin: `https://${host}`, 'tailscale-user-login': 'OWNER@example.com' };
+  for (const [headers, status] of [
+    [{ host }, 403], [{ ...remote, 'tailscale-user-login': 'other@example.com' }, 403],
+    [{ ...remote, host: 'other.ts.net' }, 403], [{ ...remote, origin: 'http://' + host }, 403],
+    [{ host: `localhost:${ctx.port}`, 'x-forwarded-host': host }, 403],
+    [remote, 200], [{ ...remote, host: host + ':443' }, 200], [{}, 200],
+  ]) {
+    const page = await request(ctx, { headers });
+    assert.equal(page.status, status);
+    if (status === 200) assert.ok(page.text.includes(TOKEN));
+    const socket = await wsOutcome(openWs(ctx, { headers }));
+    assert.deepEqual(socket, status === 200 ? { open: true } : { open: false, status });
+  }
+});
+
+test('remote detection reads the status DNS name and permits identified users', async () => {
+  const logs = [];
+  const ctx = await setup({
+    edit(raw) { raw.remote = { enabled: true }; },
+    deps: {
+      async execFile(file, args, options) {
+        assert.equal(file, 'tailscale');
+        assert.deepEqual(args, ['status', '--json']);
+        assert.equal(options.timeout, 5000);
+        return { stdout: '{"Self":{"DNSName":"PC.tail.ts.net."}}' };
+      },
+      log: msg => logs.push(msg),
+    },
+  });
+  const headers = { host: 'pc.tail.ts.net' };
+  assert.ok(logs.includes('Remote (Tailscale): https://pc.tail.ts.net/'));
+  assert.equal((await request(ctx, { headers })).status, 403);
+  headers['tailscale-user-login'] = 'user@example.com';
+  const manifest = await request(ctx, { headers, path: '/manifest.webmanifest' });
+  assert.equal(manifest.headers['content-type'], 'application/manifest+json');
+  assert.equal(manifest.json.name, 'Jarvis');
+  for (const icon of manifest.json.icons) assert.equal((await request(ctx, { headers, path: icon.src })).status, 200);
+});
+
+test('invalid Tailscale status leaves local access working and remote disabled', async () => {
+  const logs = [];
+  const ctx = await setup({
+    edit(raw) { raw.remote = { enabled: true }; },
+    deps: { execFile: async () => ({ stdout: 'invalid' }), log: msg => logs.push(msg) },
+  });
+  assert.ok(logs.some(line => line.includes('Remote (Tailscale) disabled')));
+  assert.equal((await request(ctx)).status, 200);
+  assert.equal((await request(ctx, { headers: { host: 'pc.tail.ts.net', 'tailscale-user-login': 'owner' } })).status, 403);
+});
+
 test('ping answers jarvis without a token', async () => {
   const ctx = await setup();
   const r = await request(ctx, { path: '/api/ping', headers: { 'x-jarvis-token': undefined } });
@@ -342,6 +395,50 @@ test('rejects unknown account, bad input, oversized and non-JSON bodies', async 
   const badCmd = await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'claude', quickCommandId: 'nope' } });
   assert.equal(badCmd.status, 400);
   assert.equal(ctx.calls.length, 0);
+});
+
+test('only the active terminal viewer controls size, including after disconnect', async () => {
+  const ctx = await setup();
+  const job = await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'mine', projectPath: ctx.personalPath } });
+  assert.equal(job.status, 201);
+  const id = job.json.id;
+  const proc = ctx.calls[0];
+  const send = (ws, type, fields = {}) => ws.send(JSON.stringify({ type, id, ...fields }));
+  async function attach(ws) {
+    const count = () => ws.received.filter(m => m.type === 'scrollback' && m.id === id).length;
+    const previous = count();
+    send(ws, 'attach');
+    await until(() => count() > previous);
+  }
+  async function viewer(cols) {
+    const ws = openWs(ctx);
+    assert.equal((await wsOutcome(ws)).open, true);
+    await attach(ws);
+    send(ws, 'resize', { cols, rows: 30 });
+    await attach(ws); // Wait for the preceding resize to be processed on this socket.
+    return ws;
+  }
+  const pc = await viewer(120);
+  const phone = await viewer(40);
+  const tablet = await viewer(80);
+  send(phone, 'active', { cols: -1, rows: 30 });
+  await attach(phone);
+  assert.deepEqual(proc.resizes, [[120, 30]]);
+  send(phone, 'active');
+  await until(() => proc.resizes.length === 2);
+  send(pc, 'resize', { cols: 140, rows: 35 });
+  await attach(pc);
+  assert.deepEqual(proc.resizes.at(-1), [40, 30]);
+  send(tablet, 'input', { data: 'typed' });
+  await until(() => proc.writes.includes('typed'));
+  assert.deepEqual(proc.resizes.at(-1), [80, 30]);
+  send(tablet, 'active', { cols: 85, rows: 32 });
+  await attach(tablet);
+  tablet.close();
+  await until(() => proc.resizes.at(-1)[0] === 40);
+  phone.close();
+  await until(() => proc.resizes.at(-1)[0] === 140);
+  assert.deepEqual(proc.resizes, [[120, 30], [40, 30], [80, 30], [85, 32], [40, 30], [140, 35]]);
 });
 
 test('starts a job and streams data over ws', async () => {

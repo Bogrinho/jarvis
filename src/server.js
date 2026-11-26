@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { detectTailnetHost } from './tailscale.js';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -64,6 +65,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.map': 'application/json; charset=utf-8',
@@ -196,6 +198,8 @@ export function createServer({
   };
   const port = config.port;
   const focusedClients = new Set();
+  let remoteHost;
+  const remoteUsers = config.remote?.allowedUsers?.map(user => user.toLowerCase());
   const lastJobNotice = new Map();
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
@@ -248,7 +252,15 @@ export function createServer({
 
   const hostOk = (req) => {
     const host = String(req.headers.host ?? '').toLowerCase();
+    if (remoteHost && (host === remoteHost || host === `${remoteHost}:443`)) {
+      const login = req.headers['tailscale-user-login']?.trim().toLowerCase();
+      return !!login && (!remoteUsers || remoteUsers.includes(login)) &&
+        (req.headers.origin === undefined || req.headers.origin.toLowerCase() === `https://${remoteHost}`);
+    }
     if (!allowedHosts.has(host)) return false;
+    // Serve adds X-Forwarded-Host even when the client supplies a loopback Host.
+    // Only direct connections may use the local identity-free path.
+    if (req.headers['x-forwarded-host'] !== undefined) return false;
     const origin = req.headers.origin;
     return origin === undefined || allowedOrigins.has(String(origin).toLowerCase());
   };
@@ -599,7 +611,8 @@ export function createServer({
 
   // ---------- WebSocket ----------
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
-  const attached = new Map(); // ws -> Set<jobId>
+  const terminals = new Map(); // jobId -> { active, viewers: Map<ws, { size, activity }> }
+  let activity = 0;
   const chatAttached = new Map(); // ws -> Set<chatId>
 
   server.on('upgrade', (req, socket, head) => {
@@ -629,10 +642,36 @@ export function createServer({
   const known = (id) => typeof id === 'string' && jobs.list().some((j) => j.id === id);
   const dim = (n) => Number.isInteger(n) && n > 0 && n <= 1000;
 
+  function updateViewer(id, ws, active, size) {
+    const terminal = terminals.get(id);
+    const viewer = terminal?.viewers.get(ws);
+    if (!viewer) return;
+    const changed = size && (viewer.size?.cols !== size.cols || viewer.size?.rows !== size.rows);
+    if (size) viewer.size = { cols: size.cols, rows: size.rows };
+    const takeover = active && terminal.active !== ws;
+    if (active) {
+      viewer.activity = ++activity;
+      terminal.active = ws;
+    }
+    if (terminal.active === ws && viewer.size && (changed || takeover)) {
+      jobs.resize(id, viewer.size.cols, viewer.size.rows);
+    }
+  }
+
   wss.on('connection', (ws) => {
-    attached.set(ws, new Set());
     chatAttached.set(ws, new Set());
-    ws.on('close', () => { attached.delete(ws); chatAttached.delete(ws); focusedClients.delete(ws); });
+    ws.on('close', () => {
+      chatAttached.delete(ws);
+      focusedClients.delete(ws);
+      for (const [id, terminal] of terminals) {
+        if (!terminal.viewers.delete(ws)) continue;
+        if (!terminal.viewers.size) terminals.delete(id);
+        else if (terminal.active === ws) {
+          const [next] = [...terminal.viewers].sort((a, b) => b[1].activity - a[1].activity)[0];
+          try { updateViewer(id, next, true); } catch (e) { d.log(`terminal resize failed: ${e.message}`); }
+        }
+      }
+    });
     ws.on('error', () => {});
     ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
@@ -658,18 +697,28 @@ export function createServer({
         switch (msg.type) {
           case 'attach': {
             const { scrollback } = jobs.attach(msg.id);
-            attached.get(ws)?.add(msg.id);
+            if (!terminals.has(msg.id)) terminals.set(msg.id, { active: ws, viewers: new Map() });
+            const { viewers } = terminals.get(msg.id);
+            if (!viewers.has(ws)) viewers.set(ws, { size: null, activity: 0 });
             sendWs(ws, { type: 'scrollback', id: msg.id, data: scrollback });
             break;
           }
           case 'input':
-            if (typeof msg.data === 'string') jobs.write(msg.id, msg.data);
+            if (typeof msg.data === 'string' && msg.data.length) {
+              updateViewer(msg.id, ws, true);
+              jobs.write(msg.id, msg.data);
+            }
+            break;
+          case 'active':
+            if (msg.cols === undefined && msg.rows === undefined) updateViewer(msg.id, ws, true);
+            else if (dim(msg.cols) && dim(msg.rows)) updateViewer(msg.id, ws, true, msg);
             break;
           case 'resize':
-            if (dim(msg.cols) && dim(msg.rows)) jobs.resize(msg.id, msg.cols, msg.rows);
+            if (dim(msg.cols) && dim(msg.rows)) updateViewer(msg.id, ws, false, msg);
             break;
           case 'kill':
             jobs.kill(msg.id);
+            terminals.delete(msg.id);
             break;
           default:
             break;
@@ -699,7 +748,7 @@ export function createServer({
   for (const [ev, fn] of Object.entries(chatListeners)) chats.on(ev, fn);
 
   const onData = (id, data) => {
-    for (const [ws, ids] of attached) if (ids.has(id)) sendWs(ws, { type: 'data', id, data });
+    for (const ws of terminals.get(id)?.viewers.keys() ?? []) sendWs(ws, { type: 'data', id, data });
   };
   const onJobChange = () => broadcastJobs();
   const onJobExit = (id) => { lastJobNotice.delete(id); broadcastJobs(); };
@@ -713,12 +762,21 @@ export function createServer({
       const useHome = !!account?.home && path.resolve(account.home).toLowerCase() === path.resolve(saved.cwd).toLowerCase();
       return startJob({ accountId: saved.accountId, projectPath: saved.cwd, useHome }, saved);
     },
-    listen() {
+    async listen() {
+      if (config.remote?.enabled) {
+        try {
+          remoteHost = config.remote.host ?? await detectTailnetHost(deps.execFile);
+        } catch (error) {
+          remoteHost = undefined;
+          d.log(`Remote (Tailscale) disabled: could not detect hostname (${error.message}). Set remote.host or check Tailscale.`);
+        }
+      }
       return new Promise((resolve, reject) => {
         const onError = (e) => reject(e);
         server.once('error', onError);
         server.listen(port, '127.0.0.1', () => {
           server.off('error', onError);
+          if (remoteHost) d.log(`Remote (Tailscale): https://${remoteHost}/`);
           server.on('error', (e) => d.log(`server error: ${e.message}`));
           usageTimer = setInterval(refreshUsage, usageIntervalMs);
           usageTimer.unref?.();

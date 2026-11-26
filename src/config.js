@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
+import { isTailnetHost } from './tailscale.js';
 import path from 'node:path';
 
 export class ConfigError extends Error {
@@ -54,6 +55,13 @@ export function loadConfig(filePath) {
 
   const port = raw.port ?? 4777;
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError('port must be an integer 1-65535');
+
+  const remote = raw.remote === undefined ? { enabled: false } : raw.remote;
+  if (!remote || typeof remote.enabled !== 'boolean') throw new ConfigError('remote.enabled must be a boolean');
+  if (remote.host !== undefined && !isTailnetHost(remote.host)) throw new ConfigError('remote.host must be a lowercase .ts.net DNS name');
+  if (remote.allowedUsers !== undefined && !(Array.isArray(remote.allowedUsers) && remote.allowedUsers.every(u => typeof u === 'string'))) {
+    throw new ConfigError('remote.allowedUsers must be an array of strings');
+  }
 
   const accounts = {};
   for (const [id, a] of Object.entries(raw.accounts ?? {})) {
@@ -139,6 +147,7 @@ export function loadConfig(filePath) {
   return {
     rootDir,
     port,
+    remote,
     sitewatch,
     accounts,
     projects,

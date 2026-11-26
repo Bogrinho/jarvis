@@ -7,7 +7,9 @@
       "side": "work",
       "mode": "auto",
       "home": "C:\\Users\\stath\\Documents\\Codex\\2026-05-17\\act-as-my-coding-agent-we",
-      "env": { "CODEX_HOME": "C:\\Users\\stath\\.codex" },
+      "env": {
+        "CODEX_HOME": "C:\\Users\\stath\\.codex"
+      },
       "enabled": true
     },
     "mine": {
@@ -16,7 +18,9 @@
       "side": "personal",
       "mode": "auto",
       "home": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github",
-      "env": { "CODEX_HOME": "C:\\Users\\stath\\.codex-personal" },
+      "env": {
+        "CODEX_HOME": "C:\\Users\\stath\\.codex-personal"
+      },
       "enabled": true
     },
     "claude": {
@@ -39,19 +43,69 @@
     }
   },
   "projects": [
-    {"name": "IFWDB", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\IFWDB", "side": "personal"},
-    { "name": "TikTok Sale", "path": "C:\\Users\\stath\\Documents\\TikTok Sale", "side": "personal" },
-    { "name": "Internships", "path": "C:\\Users\\stath\\Documents\\Internships", "side": "personal" },
-    { "name": "Portfolio", "path": "C:\\Users\\stath\\Documents\\Portfolio", "side": "personal" },
-    { "name": "SiteWatch", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\sitewatch-portfolio", "side": "personal" },
-    { "name": "Δουλειά (παλιός φάκελος Codex)", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-05-17\\act-as-my-coding-agent-we", "side": "work" }
+    {
+      "name": "IFWDB",
+      "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\IFWDB",
+      "side": "personal"
+    },
+    {
+      "name": "TikTok Sale",
+      "path": "C:\\Users\\stath\\Documents\\TikTok Sale",
+      "side": "personal"
+    },
+    {
+      "name": "Internships",
+      "path": "C:\\Users\\stath\\Documents\\Internships",
+      "side": "personal"
+    },
+    {
+      "name": "Portfolio",
+      "path": "C:\\Users\\stath\\Documents\\Portfolio",
+      "side": "personal"
+    },
+    {
+      "name": "SiteWatch",
+      "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\sitewatch-portfolio",
+      "side": "personal"
+    },
+    {
+      "name": "Δουλειά (παλιός φάκελος Codex)",
+      "path": "C:\\Users\\stath\\Documents\\Codex\\2026-05-17\\act-as-my-coding-agent-we",
+      "side": "work"
+    }
   ],
   "quickCommands": [
-    { "id": "plan-today", "label": "Plan Today", "prompt": "Read today.md and plan my day: order the tasks and suggest time blocks." },
-    { "id": "daily-brief", "label": "Daily Brief", "prompt": "Read today.md and give me a short daily brief of what matters most." },
-    { "id": "code-review", "label": "Code Review", "prompt": "Review the recent changes in this project and list issues; check today.md for related tasks." },
-    { "id": "new-project", "label": "New Project", "prompt": "Help me scaffold a new project; use today.md for context on current priorities." }
+    {
+      "id": "plan-today",
+      "label": "Plan Today",
+      "prompt": "Read today.md and plan my day: order the tasks and suggest time blocks."
+    },
+    {
+      "id": "daily-brief",
+      "label": "Daily Brief",
+      "prompt": "Read today.md and give me a short daily brief of what matters most."
+    },
+    {
+      "id": "code-review",
+      "label": "Code Review",
+      "prompt": "Review the recent changes in this project and list issues; check today.md for related tasks."
+    },
+    {
+      "id": "new-project",
+      "label": "New Project",
+      "prompt": "Help me scaffold a new project; use today.md for context on current priorities."
+    }
   ],
   "directivesFile": "vault/today.md",
-  "sitewatch": { "url": "https://sitewatch-live.stathisbogris.workers.dev", "tokenFile": "data/sitewatch-token.txt" }
+  "sitewatch": {
+    "url": "https://sitewatch-live.stathisbogris.workers.dev",
+    "tokenFile": "data/sitewatch-token.txt"
+  },
+  "remote": {
+    "enabled": true,
+    "host": "laptop-stathis.tail11be54.ts.net",
+    "allowedUsers": [
+      "stathisbogris@gmail.com"
+    ]
+  }
 }

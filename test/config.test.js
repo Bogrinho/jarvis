@@ -83,6 +83,19 @@ function loadRaw(raw) {
 
 const rejects = (raw, re) => assert.throws(() => loadRaw(raw), (e) => e instanceof ConfigError && re.test(e.message));
 
+test('remote access defaults off and validates optional settings', () => {
+  const raw = baseRaw();
+  assert.equal(loadRaw(raw).remote.enabled, false);
+  for (const remote of [{ enabled: true }, { enabled: true, host: 'pc.tail-net.ts.net', allowedUsers: [] }]) {
+    assert.deepEqual(loadRaw({ ...raw, remote }).remote, remote);
+  }
+  for (const remote of [null, {}, { enabled: 1 }, { enabled: true, allowedUsers: 'owner' },
+    { enabled: true, allowedUsers: [123] }]) rejects({ ...raw, remote }, /remote/);
+  for (const host of ['pc.example', 'PC.ts.net', '-pc.ts.net', 'pc..ts.net', 'pc.ts.net:443', 'https://pc.ts.net']) {
+    rejects({ ...raw, remote: { enabled: true, host } }, /remote.host/);
+  }
+});
+
 test('base separation config loads', () => {
   const c = loadRaw(baseRaw());
   assert.equal(c.accounts.mine.env.CODEX_HOME, 'C:\\x\\codex-personal');
