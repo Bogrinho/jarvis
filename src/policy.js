@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export class PolicyError extends Error {
   constructor(code, message) {
@@ -67,10 +68,11 @@ export function resolveTarget(config, { accountId, projectPath, useHome } = {}) 
   return { cwd: project.path, side: project.side };
 }
 
-// Credentials that would make a CLI bypass the account's own login folder.
+// Drop credentials that bypass the account's login folder and hooks belonging to a parent terminal.
 const STRIPPED_ENV = [
   'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY',
   'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+  'JARVIS_JOB_ID', 'JARVIS_URL', 'JARVIS_TOKEN',
 ].map((k) => k.toLowerCase());
 
 // Windows env names are case-insensitive: drop any inherited spelling of a key we set or strip.
@@ -81,8 +83,6 @@ export function buildEnv(accountEnv) {
   return Object.assign(env, accountEnv);
 }
 
-// claudeSettingsFile: extra Claude Code settings (Jarvis's status line, which reports the
-// account's 5h / weekly limits to the usage panel). Only used for Claude.
 export function buildLaunch(account, { claudeSettingsFile, claudeMcpFile, continueLast = false } = {}) {
   const base = MODE_ARGS[account.cli]?.[account.mode];
   let modeArgs = base;
@@ -94,6 +94,15 @@ export function buildLaunch(account, { claudeSettingsFile, claudeMcpFile, contin
   if (!modeArgs) throw new PolicyError('UNKNOWN_ACCOUNT', `no launch mapping for ${account.cli}/${account.mode}`);
   if (account.cli === 'codex' && !account.env?.CODEX_HOME) {
     throw new PolicyError('NO_CODEX_HOME', `account ${account.id} has no CODEX_HOME`);
+  }
+  if (account.cli === 'codex') {
+    const hook = fileURLToPath(new URL('../scripts/jarvis-hook.js', import.meta.url));
+    // The JSON array is valid TOML. Keep cmd.exe from interpreting characters in a Windows path.
+    let notify = JSON.stringify([process.execPath, hook, 'done']);
+    if (process.platform === 'win32') {
+      notify = notify.replace(/[ %!&|^<>()]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+    }
+    modeArgs = [...modeArgs, '-c', `notify=${notify}`];
   }
   if (continueLast && account.cli === 'claude') modeArgs = [...modeArgs, '--continue'];
   if (continueLast && account.cli === 'codex') modeArgs = [...modeArgs, 'resume', '--last'];

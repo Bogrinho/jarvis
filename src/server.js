@@ -26,6 +26,8 @@ const VENDOR = {
 };
 const MAX_BODY = 64 * 1024;
 const MAX_WS_PAYLOAD = 1024 * 1024;
+const HOOK_STATES = new Set(['working', 'waiting', 'done']);
+const JOB_NOTICE_INTERVAL = 20_000;
 const MAX_UPLOAD = 25 * 1024 * 1024; // screenshots and files pasted / dropped into a terminal
 
 // A safe file name: letters (any language), digits, dot, dash, underscore; no folders.
@@ -184,6 +186,7 @@ export function createServer({
     readSiteWatch: deps.readSiteWatch ?? defaultReadSiteWatch,
     notify: deps.notify ?? defaultNotify,
     siteWatchIntervalMs: deps.siteWatchIntervalMs ?? 3600000, // once an hour
+    siteWatchRetryMs: deps.siteWatchRetryMs ?? 120000,
     historyFile: deps.historyFile ?? path.join(config.rootDir, 'data', 'usage-history.json'),
     watch: deps.watch ?? fs.watch,
     log: deps.log ?? (() => {}),
@@ -192,18 +195,37 @@ export function createServer({
     relaunch: deps.relaunch ?? relaunchJarvis,
   };
   const port = config.port;
+  const focusedClients = new Set();
+  const lastJobNotice = new Map();
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
 
   let usage = {};
   let sitewatch = { state: config.sitewatch ? 'loading' : 'off' };
   let siteWatchTimer = null;
+  let siteWatchRetryTimer = null;
+  let siteWatchPending = null;
   const siteWatchStatuses = new Map();
-  async function refreshSiteWatch() {
-    if (!config.sitewatch) return;
+  function refreshSiteWatch() {
+    if (closed || !config.sitewatch) return Promise.resolve(sitewatch);
+    siteWatchPending ??= updateSiteWatch().finally(() => { siteWatchPending = null; });
+    return siteWatchPending;
+  }
+
+  async function updateSiteWatch() {
+    clearTimeout(siteWatchRetryTimer);
+    siteWatchRetryTimer = null;
+    const previous = sitewatch;
     try { sitewatch = await d.readSiteWatch({ url: config.sitewatch.url, tokenFile: config.sitewatch.tokenFile }); }
-    catch { sitewatch = { state: 'error' }; }
-    if (sitewatch?.state === 'ok' && Array.isArray(sitewatch.monitors)) {
+    catch { sitewatch = { state: 'error', reason: 'read failed' }; }
+    if (closed) return sitewatch;
+    if (sitewatch.state !== 'ok') {
+      if (sitewatch.state !== previous.state || sitewatch.reason !== previous.reason) {
+        d.log(`SiteWatch ${sitewatch.state}${sitewatch.reason ? ': ' + sitewatch.reason : ''}`);
+      }
+      siteWatchRetryTimer = setTimeout(refreshSiteWatch, d.siteWatchRetryMs);
+      siteWatchRetryTimer.unref?.();
+    } else if (Array.isArray(sitewatch.monitors)) {
       for (const monitor of sitewatch.monitors) {
         const key = monitor.host || monitor.name;
         if (!key) continue;
@@ -215,6 +237,7 @@ export function createServer({
       }
     }
     broadcast({ type: 'sitewatch', sitewatch });
+    return sitewatch;
   }
   let usageTimer = null;
   let refreshing = false;
@@ -328,6 +351,8 @@ export function createServer({
     }
     const account = config.accounts[accountId];
     const launch = buildLaunch(account, { claudeSettingsFile: d.claudeSettingsFile, claudeMcpFile: d.claudeMcpFile, continueLast: !!restored });
+    launch.env.JARVIS_URL = `http://127.0.0.1:${port}`;
+    launch.env.JARVIS_TOKEN = token;
     if (restored) title = restored.title;
     if (!title) {
       const project = config.projects.find((p) => path.resolve(p.path).toLowerCase() === path.resolve(target.cwd).toLowerCase());
@@ -488,10 +513,31 @@ export function createServer({
     if (!tokenMatches(token, req.headers['x-jarvis-token'])) return send(res, 403, { error: 'FORBIDDEN' });
 
     if (pathname === '/api/state' && req.method === 'GET') return send(res, 200, await state());
+    if (pathname === '/api/sitewatch/refresh' && req.method === 'POST') return send(res, 200, await refreshSiteWatch());
     if (pathname === '/api/upload' && req.method === 'POST') return handleUpload(req, res);
     if (pathname === '/api/jobs' && req.method === 'POST') {
       const body = await readJson(req);
       return send(res, 201, startJob(body));
+    }
+    const jobState = /^\/api\/jobs\/([^/]+)\/state$/.exec(pathname);
+    if (jobState && req.method === 'POST') {
+      const id = jobState[1];
+      const body = await readJson(req);
+      if (!HOOK_STATES.has(body?.state) || (body.id !== undefined && body.id !== id)) {
+        throw new HttpError(400, 'BAD_REQUEST');
+      }
+      const job = jobs.list().find(j => j.id === id);
+      if (!job) throw new HttpError(404, 'NOT_FOUND');
+      const changed = jobs.setHookState(id, body.state);
+      if (changed && body.state !== 'working' && focusedClients.size === 0) {
+        const now = Date.now();
+        if (now - (lastJobNotice.get(id) ?? -Infinity) >= JOB_NOTICE_INTERVAL) {
+          lastJobNotice.set(id, now);
+          const title = body.state === 'done' ? 'Jarvis: Έτοιμη απάντηση' : 'Jarvis: Σε περιμένει';
+          try { d.notify({ title, body: job.title }); } catch { /* notifications are best effort */ }
+        }
+      }
+      return send(res, 200, { ok: true });
     }
     if (chats && (pathname === '/api/chat-history' || pathname === '/api/chats' || pathname.startsWith('/api/chats/'))) {
       return handleChatApi(req, res, pathname);
@@ -586,13 +632,18 @@ export function createServer({
   wss.on('connection', (ws) => {
     attached.set(ws, new Set());
     chatAttached.set(ws, new Set());
-    ws.on('close', () => { attached.delete(ws); chatAttached.delete(ws); });
+    ws.on('close', () => { attached.delete(ws); chatAttached.delete(ws); focusedClients.delete(ws); });
     ws.on('error', () => {});
     ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
       let msg;
       try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
       if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'focus') {
+        if (msg.focused === true) focusedClients.add(ws);
+        else focusedClients.delete(ws);
+        return;
+      }
       if (msg.type === 'chat-attach') {
         if (!chats || typeof msg.id !== 'string' || !UUID_RE.test(msg.id)) return;
         try {
@@ -651,9 +702,10 @@ export function createServer({
     for (const [ws, ids] of attached) if (ids.has(id)) sendWs(ws, { type: 'data', id, data });
   };
   const onJobChange = () => broadcastJobs();
+  const onJobExit = (id) => { lastJobNotice.delete(id); broadcastJobs(); };
   jobs.on('data', onData);
   jobs.on('state', onJobChange);
-  jobs.on('exit', onJobChange);
+  jobs.on('exit', onJobExit);
 
   return {
     restoreJob(saved) {
@@ -693,12 +745,13 @@ export function createServer({
       closed = true;
       clearInterval(usageTimer);
       clearInterval(siteWatchTimer);
+      clearTimeout(siteWatchRetryTimer);
       clearTimeout(directivesDebounce);
       try { directivesWatcher?.close(); } catch { /* already closed */ }
       directivesWatcher = null;
       jobs.off('data', onData);
       jobs.off('state', onJobChange);
-      jobs.off('exit', onJobChange);
+      jobs.off('exit', onJobExit);
       for (const [ev, fn] of Object.entries(chatListeners)) chats.off(ev, fn);
       for (const ws of wss.clients) ws.terminate();
       wss.close();

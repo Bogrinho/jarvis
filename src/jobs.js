@@ -5,7 +5,7 @@ import * as pty from '@lydell/node-pty';
 const KILL_TIMEOUT_MS = 3000;
 
 export class JobManager extends EventEmitter {
-  constructor({ spawn = pty.spawn, scrollbackBytes = 512 * 1024, idleMs = 3000, promptDelayMs = 1500, submitDelayMs = 100 } = {}) {
+  constructor({ spawn = pty.spawn, scrollbackBytes = 512 * 1024, idleMs = 8000, promptDelayMs = 1500, submitDelayMs = 100 } = {}) {
     super();
     this.spawn = spawn;
     this.scrollbackBytes = scrollbackBytes;
@@ -23,11 +23,11 @@ export class JobManager extends EventEmitter {
       cols: 120,
       rows: 30,
       cwd,
-      env: launch.env,
+      env: { ...(launch.env ?? process.env), JARVIS_JOB_ID: id },
       useConpty: true,
     });
     const job = {
-      info, proc, scrollback: '', exited: false,
+      info, proc, scrollback: '', exited: false, hooked: false,
       idleTimer: null, promptTimer: null, promptPending: prompt ? prompt : null,
     };
     this.jobs.set(id, job);
@@ -35,9 +35,11 @@ export class JobManager extends EventEmitter {
     proc.onData((chunk) => {
       if (job.exited) return;
       this._append(job, chunk);
-      this._setState(job, 'working');
-      clearTimeout(job.idleTimer);
-      job.idleTimer = setTimeout(() => this._setState(job, 'idle'), this.idleMs);
+      if (!job.hooked) {
+        this._setState(job, 'working');
+        clearTimeout(job.idleTimer);
+        job.idleTimer = setTimeout(() => this._setState(job, 'idle'), this.idleMs);
+      }
       if (job.promptPending !== null) {
         clearTimeout(job.promptTimer);
         job.promptTimer = setTimeout(() => {
@@ -47,7 +49,7 @@ export class JobManager extends EventEmitter {
           proc.write(text);
           // Enter as a separate keystroke: some TUIs treat a single "text\r" chunk as a paste and don't submit.
           job.promptTimer = setTimeout(() => {
-            if (!job.exited) proc.write('\r');
+            if (!job.exited) this.write(id, '\r');
           }, this.submitDelayMs);
         }, this.promptDelayMs);
       }
@@ -68,9 +70,17 @@ export class JobManager extends EventEmitter {
   }
 
   _setState(job, state) {
-    if (job.exited || job.info.state === state) return;
+    if (job.exited || job.info.state === state) return false;
     job.info.state = state;
     this.emit('state', job.info.id, state);
+    return true;
+  }
+
+  setHookState(id, state) {
+    const job = this._get(id);
+    job.hooked = true;
+    clearTimeout(job.idleTimer);
+    return this._setState(job, state);
   }
 
   _onExit(job, exitCode) {
@@ -102,7 +112,11 @@ export class JobManager extends EventEmitter {
 
   write(id, data) {
     const job = this._get(id);
-    if (!job.exited) job.proc.write(data);
+    if (job.exited) return;
+    job.proc.write(data);
+    if (job.hooked && data.includes('\r') && ['done', 'waiting'].includes(job.info.state)) {
+      this._setState(job, 'working');
+    }
   }
 
   resize(id, cols, rows) {

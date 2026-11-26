@@ -102,6 +102,17 @@ test('codex personal launch uses personal home', () => {
   assert.ok(l.args.includes('workspace-write'));
 });
 
+test('Codex receives the Jarvis turn-complete notify program before resume arguments', () => {
+  const { cfg } = makeConfig();
+  const hook = fileURLToPath(new URL('../scripts/jarvis-hook.js', import.meta.url));
+  const { args } = buildLaunch(cfg.accounts.mine, { continueLast: true });
+  const override = args.indexOf('-c');
+  assert.ok(override > 0);
+  assert.ok(args[override + 1].startsWith('notify='));
+  assert.deepEqual(JSON.parse(args[override + 1].slice('notify='.length)), [process.execPath, hook, 'done']);
+  assert.deepEqual(args.slice(override + 2), ['resume', '--last']);
+});
+
 test('claude launch accepts edits', () => {
   const { cfg } = makeConfig();
   assert.ok(buildLaunch(cfg.accounts.claude).args.includes('acceptEdits'));

@@ -96,6 +96,37 @@ function fakeProc() {
   };
 }
 
+test('the first hook cancels fallback timing even when the state already matches', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const proc = fakeProc();
+  jm = new JobManager({ spawn: () => proc });
+  const { id } = jm.start({ accountId: 'a', cwd: '.', launch: launch(), title: 't' });
+  const state = () => jm.attach(id).info.state;
+  proc._h.d('first output');
+  t.mock.timers.tick(7999);
+  assert.equal(state(), 'working');
+  t.mock.timers.tick(1);
+  assert.equal(state(), 'idle');
+  proc._h.d('working again');
+  assert.equal(jm.setHookState(id, 'working'), false);
+  t.mock.timers.tick(8000);
+  assert.equal(state(), 'working');
+  for (const hook of ['done', 'waiting']) {
+    assert.equal(jm.setHookState(id, hook), true);
+    proc._h.d('status redraw');
+    jm.write(id, 'typing');
+    t.mock.timers.tick(16000);
+    assert.equal(state(), hook);
+    jm.write(id, 'submit\r');
+    assert.equal(state(), 'working');
+  }
+  assert.ok(jm.attach(id).scrollback.endsWith('status redraw'));
+  assert.deepEqual(proc._h.writes, ['typing', 'submit\r', 'typing', 'submit\r']);
+  proc._h.e({ exitCode: 3 });
+  assert.equal(jm.setHookState(id, 'done'), false);
+  assert.equal(state(), 'error');
+});
+
 test('prompt text and Enter are sent as two writes, in order', async () => {
   let p;
   jm = new JobManager({ idleMs: 1000, promptDelayMs: 20, spawn: () => (p = fakeProc()) });

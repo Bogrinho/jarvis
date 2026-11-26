@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import http from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
@@ -13,6 +15,8 @@ import { createServer } from '../src/server.js';
 
 const repoConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'jarvis.config.json');
 const TOKEN = 'a'.repeat(64);
+const run = promisify(execFile);
+const hookScript = fileURLToPath(new URL('../scripts/jarvis-hook.js', import.meta.url));
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -375,6 +379,93 @@ test('starts a job and streams data over ws', async () => {
   assert.equal(ping.text, 'jarvis');
 });
 
+test('job state hooks require authentication, a valid state and a matching live job id', async () => {
+  const ctx = await setup();
+  const { json: { id } } = await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'mine' } });
+  const post = (body, headers) => request(ctx, { method: 'POST', path: `/api/jobs/${id}/state`, body, headers });
+  for (const token of [undefined, 'incorrect']) {
+    assert.equal((await post({ id, state: 'done' }, { 'x-jarvis-token': token })).status, 403);
+  }
+  for (const body of [{}, { state: 'idle' }, { state: 'error' }, { state: 1 }, { id: 'other', state: 'done' }, null]) {
+    assert.equal((await post(body)).status, 400);
+  }
+  const unknown = await request(ctx, { method: 'POST', path: '/api/jobs/unknown/state', body: { state: 'done' } });
+  assert.equal(unknown.status, 404);
+  assert.equal(ctx.jobs.attach(id).info.state, 'working');
+});
+
+test('a spawned notify command broadcasts completion, and Enter starts the next turn', async () => {
+  const notices = [];
+  const ctx = await setup({ deps: { notify: n => notices.push(n) } });
+  const ws = openWs(ctx);
+  assert.equal((await wsOutcome(ws)).open, true);
+  const { json: job } = await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'mine' } });
+  const proc = ctx.calls[0];
+  const config = proc.args[proc.args.indexOf('-c') + 1];
+  const [node, ...args] = JSON.parse(config.slice('notify='.length));
+  assert.equal(proc.opts.env.JARVIS_JOB_ID, job.id);
+  assert.equal(proc.opts.env.JARVIS_URL, `http://127.0.0.1:${ctx.port}`);
+  const result = await run(node, [...args, '{"type":"agent-turn-complete"}'], { env: proc.opts.env, timeout: 5000 });
+  assert.deepEqual(result, { stdout: '', stderr: '' });
+  await until(() => ws.received.some(m => m.type === 'jobs' && m.list.some(j => j.id === job.id && j.state === 'done')));
+  assert.deepEqual(notices, [{ title: 'Jarvis: Έτοιμη απάντηση', body: job.title }]);
+  ws.send(JSON.stringify({ type: 'input', id: job.id, data: 'next\r' }));
+  await until(() => ctx.jobs.attach(job.id).info.state === 'working');
+  assert.equal(proc.writes.at(-1), 'next\r');
+});
+
+test('hook notifications respect window focus, debounce per job, and skip exits', async (t) => {
+  const notices = [];
+  const ctx = await setup({ deps: { notify: n => notices.push(n) } });
+  const ws = openWs(ctx);
+  assert.equal((await wsOutcome(ws)).open, true);
+  const start = async (prompt) => (await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'claude', prompt } })).json.id;
+  const first = await start('First job');
+  const second = await start('Second job');
+  const post = async (id, state) => assert.equal((await request(ctx, { method: 'POST', path: `/api/jobs/${id}/state`, body: { id, state } })).status, 200);
+  const focus = async (focused) => {
+    ws.send(JSON.stringify({ type: 'focus', focused }));
+    // Input on the same socket is processed after the focus message.
+    ws.send(JSON.stringify({ type: 'input', id: first, data: String(focused) }));
+    await until(() => ctx.calls[0].writes.includes(String(focused)));
+  };
+  await focus(true);
+  await post(first, 'waiting');
+  assert.deepEqual(notices, []);
+  await focus(false);
+  await post(first, 'waiting'); // duplicate
+  assert.deepEqual(notices, []);
+  await post(first, 'working');
+  await post(first, 'waiting');
+  await post(first, 'done'); // same job in the cooldown period
+  ctx.calls[1].emit('redraw without hooks');
+  await post(second, 'done');
+  assert.deepEqual(notices, [
+    { title: 'Jarvis: Σε περιμένει', body: 'First job' },
+    { title: 'Jarvis: Έτοιμη απάντηση', body: 'Second job' },
+  ]);
+  const third = await start('Third job');
+  await post(third, 'working');
+  ctx.calls[2].exitCb({ exitCode: 0 });
+  await post(third, 'waiting'); // a late hook cannot replace the exit state
+  assert.equal(ctx.jobs.attach(third).info.state, 'done');
+  assert.equal(notices.length, 2);
+  const later = Date.now() + 20_000;
+  t.mock.method(Date, 'now', () => later);
+  await post(first, 'working');
+  await post(first, 'done');
+  assert.equal(notices.length, 3);
+  assert.deepEqual(notices.at(-1), { title: 'Jarvis: Έτοιμη απάντηση', body: 'First job' });
+});
+
+test('the hook script quietly succeeds without job environment or with an unavailable server', async () => {
+  for (const url of ['', `http://127.0.0.1:${await freePort()}`]) {
+    const env = { ...process.env, JARVIS_URL: url, JARVIS_JOB_ID: url ? 'test' : '', JARVIS_TOKEN: url ? TOKEN : '' };
+    const result = await run(process.execPath, [hookScript, 'done'], { env, timeout: 5000 });
+    assert.deepEqual(result, { stdout: '', stderr: '' });
+  }
+});
+
 test('quick command runs in account home', async () => {
   const ctx = await setup();
   const r = await request(ctx, { method: 'POST', path: '/api/jobs', body: { accountId: 'claude', quickCommandId: 'plan-today', projectPath: ctx.personalPath } });
@@ -478,8 +569,12 @@ test('upload refuses unknown terminals, bad names, path tricks and big files', a
   assert.equal((await upload(ctx, `job=${job.id}&name=a.png`, Buffer.from('x'), { 'x-jarvis-token': 'wrong' })).status, 403);
 });
 
+function configureSiteWatch(raw) {
+  raw.sitewatch = { url: 'https://sw.example.workers.dev', tokenFile: 'data/sitewatch-token.txt' };
+}
+
 test('state includes SiteWatch status from the reader, without the key', async () => {
-  const ctx = await setup({ edit: (raw) => { raw.sitewatch = { url: 'https://sw.example.workers.dev', tokenFile: 'data/sitewatch-token.txt' }; }, deps: { readSiteWatch: async (o) => ({ state: 'ok', generated_at: 'g', monitors: [{ name: 'A', host: 'a.gr', status: 'up', response_time_ms: 120 }], _saw: o.tokenFile ? 'file' : 'none' }) } });
+  const ctx = await setup({ edit: configureSiteWatch, deps: { readSiteWatch: async (o) => ({ state: 'ok', generated_at: 'g', monitors: [{ name: 'A', host: 'a.gr', status: 'up', response_time_ms: 120 }], _saw: o.tokenFile ? 'file' : 'none' }) } });
   const r = await request(ctx, { path: '/api/state' });
   assert.equal(r.json.sitewatch.state, 'ok');
   assert.equal(r.json.sitewatch.monitors[0].host, 'a.gr');
@@ -489,15 +584,79 @@ test('state reports SiteWatch as off when it is not configured', async () => {
   const ctx = await setup();
   const r = await request(ctx, { path: '/api/state' });
   assert.equal(r.json.sitewatch.state, 'off');
+  const refresh = await request(ctx, { method: 'POST', path: '/api/sitewatch/refresh' });
+  assert.deepEqual(refresh.json, { state: 'off' });
 });
 
+
+test('SiteWatch retries after failures, stops on recovery and logs only changed failures', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const logs = [];
+  let reads = 0;
+  let result = { state: 'error', reason: 'network' };
+  const ctx = await setup({
+    edit: configureSiteWatch,
+    deps: {
+      siteWatchRetryMs: 200,
+      log: (line) => logs.push(line),
+      readSiteWatch: async () => { reads++; return result; },
+    },
+  });
+  assert.equal(reads, 1);
+  await ctx.server.refreshSiteWatch();
+  t.mock.timers.tick(199);
+  assert.equal(reads, 2);
+
+  result = { state: 'error', reason: 'timeout' };
+  t.mock.timers.tick(1);
+  assert.deepEqual((await request(ctx, { path: '/api/state' })).json.sitewatch, result);
+  assert.equal(reads, 3);
+
+  result = { state: 'ok', monitors: [] };
+  t.mock.timers.tick(200);
+  assert.deepEqual((await request(ctx, { path: '/api/state' })).json.sitewatch, result);
+  t.mock.timers.tick(400);
+  assert.equal(reads, 4);
+
+  result = { state: 'error', reason: 'timeout' };
+  await ctx.server.refreshSiteWatch();
+  assert.deepEqual(logs, ['SiteWatch error: network', 'SiteWatch error: timeout', 'SiteWatch error: timeout']);
+  await ctx.server.close();
+  t.mock.timers.tick(200);
+  assert.equal(reads, 5);
+});
+
+test('POST SiteWatch refresh requires authentication and returns the fresh shared result', async () => {
+  let reads = 0;
+  const next = Promise.withResolvers();
+  const ctx = await setup({
+    edit: configureSiteWatch,
+    deps: { readSiteWatch: async () => ++reads === 1 ? { state: 'error', reason: 'network' } : next.promise },
+  });
+  const post = { method: 'POST', path: '/api/sitewatch/refresh' };
+  const denied = await request(ctx, { ...post, headers: { 'x-jarvis-token': undefined } });
+  assert.equal(denied.status, 403);
+  assert.equal(reads, 1);
+
+  const response = request(ctx, post);
+  await until(() => reads === 2);
+  const overlappingRefresh = ctx.server.refreshSiteWatch();
+  const recovered = { state: 'ok', monitors: [{ name: 'A', host: 'a.gr', status: 'up' }] };
+  next.resolve(recovered);
+  const r = await response;
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json, recovered);
+  assert.deepEqual(await overlappingRefresh, recovered);
+  assert.deepEqual((await request(ctx, { path: '/api/state' })).json.sitewatch, recovered);
+  assert.equal(reads, 2);
+});
 
 test('SiteWatch notifies only when a known monitor changes up state', async () => {
   let status = 'up';
   let state = 'ok';
   const notices = [];
   const ctx = await setup({
-    edit: (raw) => { raw.sitewatch = { url: 'https://sw.example.workers.dev', tokenFile: 'data/sitewatch-token.txt' }; },
+    edit: configureSiteWatch,
     deps: { notify: (n) => notices.push(n), readSiteWatch: async () => state === 'ok' ? { state, monitors: [{ name: 'Site', host: 'example.com', status }] } : { state } },
   });
   assert.deepEqual(notices, []);

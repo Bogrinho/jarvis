@@ -10,6 +10,7 @@ import { restoreJobs } from './restart.js';
 import { createChat } from './chat/setup.js';
 import { refreshWindowsPath } from './winpath.js';
 import { writeClaudeJarvisSettings, writeClaudeJarvisMcp } from './claude-settings.js';
+import { setupCodexHelpers } from '../scripts/setup-codex-helpers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noOpen = process.argv.includes('--no-open');
@@ -24,6 +25,10 @@ let claudeSettingsFile = null;
 try { claudeSettingsFile = writeClaudeJarvisSettings(config.rootDir); } catch { /* usage falls back to tokens */ }
 let claudeMcpFile = null;
 try { claudeMcpFile = writeClaudeJarvisMcp(config.rootDir); } catch { /* Claude still runs, without helpers */ }
+try {
+  const account = Object.values(config.accounts).find(a => a.enabled && a.side === 'personal' && a.cli === 'codex' && a.env?.CODEX_HOME);
+  if (account) setupCodexHelpers(account.env.CODEX_HOME, path.join(config.rootDir, 'scripts', 'helpers-mcp.js'));
+} catch { /* Codex still runs, without helpers */ }
 
 function log(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;

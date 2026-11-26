@@ -1,6 +1,7 @@
 // Jarvis HUD: wires the mockup layout to /api/state and the /ws socket.
 // Everything from the server is data: it only ever reaches the DOM via textContent.
 import { createOrb } from './orb.js';
+import { createDictation, appendSpeech } from './voice.js';
 import { h as el, createChatPane, fmtAgo } from './chat.js';
 
 const TOKEN = document.querySelector('meta[name="jarvis-token"]')?.content ?? '';
@@ -8,10 +9,10 @@ const $ = (id) => document.getElementById(id);
 
 // Display copy per account (from the mockup).
 const LOOK = {
-  work: { name: 'CODEX', display: 'Codex Δουλειά', mode: 'Codex mode · λογαριασμός δουλειάς', card: 'Codex δουλειά · weekly usage' },
-  mine: { name: 'CODEX', display: 'Codex Δικό μου', mode: 'Codex mode · προσωπικός λογαριασμός', card: 'Codex δικό μου · weekly usage' },
-  claude: { name: 'CLAUDE', display: 'Claude Code', mode: 'Original Jarvis core · Claude Code mode', card: 'Claude · weekly usage' },
-  gemini: { name: 'GEMINI', display: 'Gemini', mode: 'Gemini mode · Antigravity CLI', card: 'Gemini · weekly usage' },
+  work: { name: 'Codex', display: 'Codex Δουλειά', mode: 'Codex mode · λογαριασμός δουλειάς', card: 'Codex δουλειά · weekly usage' },
+  mine: { name: 'Codex', display: 'Codex Δικό μου', mode: 'Codex mode · προσωπικός λογαριασμός', card: 'Codex δικό μου · weekly usage' },
+  claude: { name: 'Claude', display: 'Claude Code', mode: 'Original Jarvis core · Claude Code mode', card: 'Claude · weekly usage' },
+  gemini: { name: 'Gemini', display: 'Gemini', mode: 'Gemini mode · Antigravity CLI', card: 'Gemini · weekly usage' },
 };
 const look = (acc) => LOOK[acc.id] ?? {
   name: acc.label.toUpperCase(), display: acc.label, mode: `${acc.label} mode`, card: `${acc.label} · weekly usage`,
@@ -28,7 +29,7 @@ const ERRORS = {
   HISTORY_UNAVAILABLE: 'Το ιστορικό δεν είναι διαθέσιμο αυτή τη στιγμή',
 };
 const errorText = (code) => ERRORS[code] ?? `Κάτι πήγε στραβά (${code})`;
-const STATE_LABEL = { idle: 'Idle', working: 'Working', waiting: 'Waiting', done: 'Done', error: 'Error' };
+const STATE_LABEL = { idle: 'Idle', working: 'Working', waiting: 'Περιμένει εσένα', done: 'Done', error: 'Error' };
 const DAYS = ['ΚΥΡ', 'ΔΕΥ', 'ΤΡΙ', 'ΤΕΤ', 'ΠΕΜ', 'ΠΑΡ', 'ΣΑΒ'];
 
 // ---------- small helpers ----------
@@ -61,17 +62,17 @@ function fmtReset(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const hm = d.toTimeString().slice(0, 5);
-  return d.getTime() - Date.now() < 20 * 3600e3 ? `reset ${hm}` : `reset ${DAYS[d.getDay()]} ${hm}`;
+  return d.getTime() - Date.now() < 20 * 3600e3 ? hm : `${DAYS[d.getDay()]} ${hm}`;
 }
 const WEEKDAYS = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ'];
 // "updated 14:05" today, "updated Δευ 14:05" on another day; '' when unknown.
-function fmtUpdated(iso) {
+function fmtUpdated(iso, label) {
   const d = new Date(iso);
   if (iso == null || Number.isNaN(d.getTime())) return '';
   const hm = d.toTimeString().slice(0, 5);
-  return d.toDateString() === new Date().toDateString() ? `updated ${hm}` : `updated ${WEEKDAYS[d.getDay()]} ${hm}`;
+  return d.toDateString() === new Date().toDateString() ? `${label} ${hm}` : `${label} ${WEEKDAYS[d.getDay()]} ${hm}`;
 }
-const updatedText = (view) => (view && view.kind !== 'none' ? fmtUpdated(view.updatedAt) : '');
+const updatedText = (view, label = 'updated') => (view && view.kind !== 'none' ? fmtUpdated(view.updatedAt, label) : '');
 function showMsg(node, text, ok = false) {
   node.textContent = text;
   node.classList.toggle('ok', ok);
@@ -117,7 +118,7 @@ async function api(method, path, body) {
 }
 
 // ---------- orb + switcher ----------
-const orb = createOrb($('orb'), { shape: S.selected, rgb: [224, 96, 154], pauseButton: $('pause') });
+const orb = createOrb($('orb'), { shape: S.selected, pauseButton: $('pause') });
 
 function renderSwitcher() {
   const nav = $('switch');
@@ -162,6 +163,7 @@ function sparkline(series, color) {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 100 22');
   svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
   const pts = (Array.isArray(series) ? series : []).filter(Number.isFinite);
   if (pts.length) {
     const line = document.createElementNS(NS, 'polyline');
@@ -185,44 +187,178 @@ function perDayText(perDay) {
   return `${perDay < 0 ? '▼' : '▲'} ${n}% /μέρα`;
 }
 
+const usageStatus = { low: 'Άνετα', medium: 'Πρόσεχε', high: 'Σχεδόν τέλος' };
+const usageLevel = (used) => used >= 85 ? 'high' : used >= 60 ? 'medium' : 'low';
+const LEVEL_COLOR = { low: '#30d158', medium: '#ff9f0a', high: '#ff453a' };
+
+function activityRings({ name, wUsed, fUsed, wColor, fColor, wRemaining, fRemaining }) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 52 52');
+  svg.setAttribute('width', '48');
+  svg.setAttribute('height', '48');
+  svg.setAttribute('class', 'vital-rings');
+  svg.setAttribute('aria-hidden', 'false');
+
+  const g = document.createElementNS(NS, 'g');
+  g.setAttribute('transform', 'rotate(-90 26 26)');
+
+  const c1 = 2 * Math.PI * 21; // ~131.95
+  const c2 = 2 * Math.PI * 14; // ~87.96
+
+  // Outer track (Εβδομάδα)
+  const t1 = document.createElementNS(NS, 'circle');
+  t1.setAttribute('cx', '26');
+  t1.setAttribute('cy', '26');
+  t1.setAttribute('r', '21');
+  t1.setAttribute('fill', 'none');
+  t1.setAttribute('stroke', 'rgba(255, 255, 255, 0.08)');
+  t1.setAttribute('stroke-width', '4.5');
+
+  // Inner track (5 ώρες)
+  const t2 = document.createElementNS(NS, 'circle');
+  t2.setAttribute('cx', '26');
+  t2.setAttribute('cy', '26');
+  t2.setAttribute('r', '14');
+  t2.setAttribute('fill', 'none');
+  t2.setAttribute('stroke', 'rgba(255, 255, 255, 0.08)');
+  t2.setAttribute('stroke-width', '4.5');
+
+  g.append(t1, t2);
+
+  // Outer progress
+  const p1 = document.createElementNS(NS, 'circle');
+  p1.setAttribute('cx', '26');
+  p1.setAttribute('cy', '26');
+  p1.setAttribute('r', '21');
+  p1.setAttribute('fill', 'none');
+  p1.setAttribute('stroke', wUsed > 0 ? wColor : 'transparent');
+  p1.setAttribute('stroke-width', '4.5');
+  p1.setAttribute('stroke-linecap', 'round');
+  p1.setAttribute('stroke-dasharray', `${c1.toFixed(2)} ${c1.toFixed(2)}`);
+  const off1 = Math.max(0, c1 * (1 - Math.min(100, Math.max(0, wUsed)) / 100));
+  p1.setAttribute('stroke-dashoffset', off1.toFixed(2));
+  p1.setAttribute('role', 'progressbar');
+  p1.setAttribute('aria-label', `${name} · Εβδομάδα · ποσοστό χρήσης`);
+  p1.setAttribute('aria-valuemin', '0');
+  p1.setAttribute('aria-valuemax', '100');
+  p1.setAttribute('aria-valuenow', String(Math.round(wUsed)));
+  p1.setAttribute('aria-valuetext', wRemaining);
+
+  // Inner progress
+  const p2 = document.createElementNS(NS, 'circle');
+  p2.setAttribute('cx', '26');
+  p2.setAttribute('cy', '26');
+  p2.setAttribute('r', '14');
+  p2.setAttribute('fill', 'none');
+  p2.setAttribute('stroke', fUsed > 0 ? fColor : 'transparent');
+  p2.setAttribute('stroke-width', '4.5');
+  p2.setAttribute('stroke-linecap', 'round');
+  p2.setAttribute('stroke-dasharray', `${c2.toFixed(2)} ${c2.toFixed(2)}`);
+  const off2 = Math.max(0, c2 * (1 - Math.min(100, Math.max(0, fUsed)) / 100));
+  p2.setAttribute('stroke-dashoffset', off2.toFixed(2));
+  p2.setAttribute('role', 'progressbar');
+  p2.setAttribute('aria-label', `${name} · 5 ώρες · ποσοστό χρήσης`);
+  p2.setAttribute('aria-valuemin', '0');
+  p2.setAttribute('aria-valuemax', '100');
+  p2.setAttribute('aria-valuenow', String(Math.round(fUsed)));
+  p2.setAttribute('aria-valuetext', fRemaining);
+
+  g.append(p1, p2);
+  svg.append(g);
+  return svg;
+}
+
+function usageBar(name, label, used, resetsAt) {
+  const remaining = `Μένει ${fmtPct(100 - used)}%`;
+  const resetTime = resetsAt && fmtReset(resetsAt);
+  return el('div', { class: 'vital-period' },
+    el('div', { class: 'vital-row' }, el('span', { text: label }), el('strong', { text: remaining })),
+    el('div', {
+      class: 'vital-track', 'data-level': usageLevel(used), style: { '--used': `${used}%` },
+      role: 'progressbar', 'aria-label': `${name} · ${label} · ποσοστό χρήσης`,
+      'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': used, 'aria-valuetext': remaining,
+    }),
+    resetTime ? el('small', { text: `μηδενίζεται ${resetTime}` }) : null);
+}
+
 function renderVitals() {
   const box = $('vitals');
   box.replaceChildren();
+  let latestUpdated = null;
+
   for (const acc of S.accounts) {
     const color = safeColor(acc.color);
     const view = S.usage[acc.id];
-    const big = el('div', { class: 'big' });
-    if (view?.kind === 'percent') {
-      const w = view.weekly;
-      big.append(w?.reset ? '0%' : `${fmtPct(w?.pct)}%`);
-      if (w?.reset) big.append(el('small', { text: '(reset)' }));
-      const f = view.fiveHour;
-      if (f) {
-        const five = f.reset ? '5h 0% (reset)' : `5h ${fmtPct(f.pct)}%`;
-        const reset = !f.reset && f.resetsAt ? ` · ${fmtReset(f.resetsAt)}` : '';
-        big.append(el('small', { text: five + reset }));
+    const name = look(acc).display;
+
+    if (view && view.kind !== 'none' && view.updatedAt) {
+      const t = new Date(view.updatedAt).getTime();
+      if (Number.isFinite(t) && (!latestUpdated || t > new Date(latestUpdated).getTime())) {
+        latestUpdated = view.updatedAt;
       }
-    } else if (view?.kind === 'tokens') {
-      big.append(fmtTokens(view.weekly?.tokens));
-      big.append(el('small', { text: 'tokens / 7d' }));
-    } else {
-      big.classList.add('dim');
-      big.textContent = !acc.enabled || view?.reason === 'not set up' ? 'not set up' : 'no data';
-      if (view?.reason) big.title = view.reason;
     }
-    const upd = updatedText(view);
-    box.append(el('div', { class: 'vital', style: { '--c': color } },
-      el('div', { class: 'lbl' }, look(acc).display, el('em', { text: perDayText(view?.perDay) })),
-      big,
-      sparkline(view?.kind === 'percent' ? view.series : [], color),
-      upd ? el('div', { class: 'upd', text: upd }) : null));
+
+    const vital = el('div', { class: 'vital', style: { '--c': color } });
+    if (view?.kind === 'percent') {
+      const wPeriod = view.weekly;
+      const fPeriod = view.fiveHour;
+      const wUsed = wPeriod?.reset ? 0 : Math.max(0, Math.min(100, Number.isFinite(wPeriod?.pct) ? wPeriod.pct : 0));
+      const fUsed = fPeriod?.reset ? 0 : Math.max(0, Math.min(100, Number.isFinite(fPeriod?.pct) ? fPeriod.pct : 0));
+      const wLevel = usageLevel(wUsed);
+      const fLevel = usageLevel(fUsed);
+      const peak = Math.max(Number.isFinite(wPeriod?.pct) ? wUsed : 0, Number.isFinite(fPeriod?.pct) ? fUsed : 0);
+      const peakLevel = usageLevel(peak);
+      const statusWord = usageStatus[peakLevel];
+
+      const wReset = wPeriod?.resetsAt ? fmtReset(wPeriod.resetsAt) : '';
+      const fReset = fPeriod?.resetsAt ? fmtReset(fPeriod.resetsAt) : '';
+      const wRemaining = Number.isFinite(wPeriod?.pct) || wPeriod?.reset ? `Μένει ${fmtPct(100 - wUsed)}%` : '—';
+      const fRemaining = Number.isFinite(fPeriod?.pct) || fPeriod?.reset ? `Μένει ${fmtPct(100 - fUsed)}%` : '—';
+      const wLine = `Εβδομάδα · ${wRemaining}${wReset ? ` · ${wReset}` : ''}`;
+      const fLine = `5 ώρες · ${fRemaining}${fReset ? ` · ${fReset}` : ''}`;
+
+      const rings = activityRings({
+        name,
+        wUsed,
+        fUsed,
+        wColor: LEVEL_COLOR[wLevel],
+        fColor: LEVEL_COLOR[fLevel],
+        wRemaining,
+        fRemaining,
+      });
+
+      const header = el('div', { class: 'vital-ring-header' },
+        el('strong', { text: name }),
+        statusWord ? el('span', { class: 'vital-status', 'data-level': peakLevel, text: statusWord }) : null
+      );
+      const lines = el('div', { class: 'vital-ring-lines' },
+        el('div', { class: 'vital-ring-sub' }, wLine),
+        el('div', { class: 'vital-ring-sub' }, fLine)
+      );
+      const body = el('div', { class: 'vital-ring-body' }, header, lines);
+      const row = el('div', { class: 'vital-ring-row' }, rings, body);
+      vital.append(row);
+    } else if (view?.kind === 'tokens') {
+      const header = el('div', { class: 'vital-row vital-header' }, el('strong', { text: name }));
+      vital.append(header, el('div', { class: 'big' }, fmtTokens(view.weekly?.tokens), el('small', { text: 'tokens / 7 μέρες' })));
+    } else {
+      continue; // no usage data for this account: leave it out
+    }
+    box.append(vital);
   }
+
+  if (latestUpdated) {
+    const upd = fmtUpdated(latestUpdated, 'Ενημέρωση');
+    if (upd) box.append(el('div', { class: 'vitals-foot', text: upd }));
+  }
+
   renderCard();
 }
 
 function renderCard() {
   const acc = selectedAccount();
-  if (!acc) return;
+  if (!acc || !$('cardT')) return; // the usage card was removed from the page
   const view = S.usage[acc.id];
   $('cardT').textContent = look(acc).card;
   let n = '—';
@@ -265,22 +401,45 @@ const SW_NOTE = {
 };
 const swMs = (v) => (Number.isFinite(v) ? `${Math.round(v)} ms` : '—');
 const swPct = (v) => (Number.isFinite(v) ? `${v.toFixed(v >= 99.95 ? 0 : 1)}%` : '—');
+let refreshingSites = false;
+async function retrySites() {
+  if (refreshingSites || !S.sitewatch || ['off', 'ok'].includes(S.sitewatch.state)) return;
+  refreshingSites = true;
+  renderSites();
+  try {
+    S.sitewatch = await api('POST', '/api/sitewatch/refresh');
+  } catch { /* Keep the current status so the user can retry. */ }
+  finally {
+    refreshingSites = false;
+    renderSites();
+  }
+}
+window.addEventListener('focus', retrySites);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) retrySites(); });
+
 function renderSites() {
   const sw = S.sitewatch ?? { state: 'off' };
   $('sw').hidden = sw.state === 'off';
   const box = $('sites');
   box.replaceChildren();
+  if (sw.state === 'off') return;
   if (sw.state !== 'ok') {
-    box.append(el('p', { class: 'sw-note', text: SW_NOTE[sw.state] ?? SW_NOTE.error }));
+    const note = refreshingSites ? SW_NOTE.loading : (SW_NOTE[sw.state] ?? SW_NOTE.error);
+    box.append(el('p', { class: 'sw-note' }, note, ' ',
+      el('button', { class: 'pill', type: 'button', disabled: refreshingSites, onclick: retrySites, text: 'Δοκίμασε ξανά' })));
     return;
   }
   if (!sw.monitors.length) { box.append(el('p', { class: 'sw-note', text: 'Δεν υπάρχουν sites στο SiteWatch.' })); return; }
   for (const m of sw.monitors) {
     const status = ['up', 'degraded', 'down'].includes(m.status) ? m.status : 'unknown';
     const ssl = Number.isFinite(m.ssl_days_remaining) ? `SSL ${m.ssl_days_remaining} ημ.` : 'SSL —';
+    const ms = m.response_time_ms;
+    const speed = !Number.isFinite(ms) ? '' : ms < 800 ? 'speed-fast' : ms < 1500 ? 'speed-med' : 'speed-slow';
     box.append(el('div', { class: `site s-${status}`, title: `${m.host ?? ''} · ${status}` },
-      el('div', { class: 'site-top' }, el('i', { class: 'site-dot', 'aria-hidden': 'true' }), el('b', { text: m.name ?? m.host ?? '—' }),
-        el('span', { class: 'site-ms', text: swMs(m.response_time_ms) })),
+      el('div', { class: 'site-top' },
+        el('i', { class: 'site-dot', 'aria-hidden': 'true' }),
+        el('b', { text: m.name ?? m.host ?? '—' }),
+        el('span', { class: `site-ms ${speed}`.trim(), text: swMs(ms) })),
       el('div', { class: 'site-sub', text: `διάμεσος ${swMs(m.median_response_ms)} · διαθ. ${swPct(m.uptime_percentage)} · ${ssl}` })));
   }
 }
@@ -460,10 +619,21 @@ $('newTerm').addEventListener('click', (e) => {
 });
 $('picker').addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', closePicker);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  closePicker();
+  if (maximizedId && !e.defaultPrevented && !e.target.closest?.('.xterm')) toggleMaximized(maximizedId);
+});
 
 // ---------- sessions (terminal jobs + chats): dock, drawer, panes ----------
 const panes = new Map(); // id -> terminal pane { kind:'terminal', node, term, fit, ... } | chat pane { kind:'chat', view, node }
+const voice = createDictation(() => panes.get(S.focused)?.mic ?? askMic);
+const askMic = voice.button(text => {
+  const input = $('askInput');
+  input.value = appendSpeech(input.value, text);
+});
+if (askMic) $('askInput').after(askMic);
+let maximizedId = null;
 // Terminals and chats share one dock, oldest first.
 const visibleJobs = () => [
   ...S.jobs.map((j) => ({ kind: 'terminal', id: j.id, accountId: j.accountId, title: j.title, state: j.state, cwd: j.cwd, t: Number(j.startedAt) || 0, info: j })),
@@ -490,10 +660,15 @@ function setDock(open) {
 $('tt').addEventListener('click', () => setDock(!dockOpen()));
 $('openTerms').addEventListener('click', () => setDock(true));
 
-function focusJob(id, open = false) {
+function selectJob(id) {
   S.focused = id;
-  if (open) setDock(true);
+  if (maximizedId) maximizedId = id;
   renderJobs();
+}
+
+function focusJob(id, open = false) {
+  if (open) setDock(true);
+  selectJob(id);
   const pane = panes.get(id);
   if (pane && dockOpen()) {
     pane.node.scrollIntoView({ block: 'nearest' });
@@ -501,11 +676,20 @@ function focusJob(id, open = false) {
   }
 }
 
+function toggleMaximized(id) {
+  maximizedId = maximizedId === id ? null : id;
+  selectJob(id);
+  const pane = panes.get(id);
+  pane.maximize.focus({ preventScroll: true });
+  if (!maximizedId) pane.node.scrollIntoView({ block: 'nearest' });
+  requestAnimationFrame(fitAll);
+}
+
 function sendWs(msg) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function createPane(job) {
+function createPane(job, maximize) {
   const acc = account(job.accountId);
   const color = safeColor(acc?.color);
   const rgb = hexRgb(color).join(',');
@@ -515,10 +699,12 @@ function createPane(job) {
   const attach = el('button', { type: 'button', class: 'x', 'aria-label': 'Επισύναψη αρχείου', title: 'Επισύναψη εικόνας ή αρχείου', text: '📎' });
   const picker = el('input', { type: 'file', multiple: true, hidden: true });
   const host = el('div', { class: 'xt' });
+  const sendInput = data => sendWs({ type: 'input', id: job.id, data });
+  const mic = voice.button((text, continued) => sendInput((continued ? ' ' : '') + text));
   const node = el('div', { class: 'term', style: { '--c': color, '--c-rgb': rgb } },
     el('header', {},
       el('span', { class: 'l' }, el('i', { class: 'dot', 'aria-hidden': 'true' }), title),
-      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, attach, close, picker)),
+      el('span', { class: 'r' }, el('span', { class: 'who', text: acc ? look(acc).display : job.accountId }), stateEl, attach, mic, maximize, close, picker)),
     el('div', { class: 'beam', 'aria-hidden': 'true' }),
     host);
   node.addEventListener('mousedown', () => { if (S.focused !== job.id) focusJob(job.id); });
@@ -528,7 +714,7 @@ function createPane(job) {
   let fit = null;
   if (typeof window.Terminal === 'function') {
     term = new window.Terminal({
-      fontFamily: '"JetBrains Mono", monospace',
+      fontFamily: '"Cascadia Mono", "SFMono-Regular", Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.3,
       cursorBlink: true,
@@ -537,18 +723,18 @@ function createPane(job) {
       scrollback: 5000,
       allowTransparency: true,
       theme: {
-        // transparent so the glass panel behind shows through; palette tuned to the HUD
+        // The host supplies the opaque terminal surface, including its padding.
         background: 'rgba(0,0,0,0)',
-        foreground: '#e2dce5',
+        foreground: '#eeeef4',
         cursor: color,
         cursorAccent: '#0f0d10',
         selectionBackground: `rgba(${rgb},0.30)`,
-        black: '#1a1620', brightBlack: '#6b6472',
+        black: '#1a1a22', brightBlack: '#9696a5',
         red: '#ff6b8a', brightRed: '#ff8fa6',
-        green: '#5fd39a', brightGreen: '#86e3b4',
+        green: '#62d49d', brightGreen: '#86e3b4',
         yellow: '#f2c66d', brightYellow: '#f7d78f',
         blue: '#6f9bff', brightBlue: '#93b4ff',
-        magenta: '#e0609a', brightMagenta: '#ee8bb8',
+        magenta: '#e874bf', brightMagenta: '#ee8bb8',
         cyan: '#6fd6e8', brightCyan: '#9be5f0',
         white: '#d6d0d9', brightWhite: '#f4f0f5',
       },
@@ -560,12 +746,12 @@ function createPane(job) {
     term.open(host);
     enableClipboard(term, host);
     enableFiles(term, node, host, attach, picker, job.id);
-    term.onData((data) => sendWs({ type: 'input', id: job.id, data }));
+    term.onData(sendInput);
     term.onResize(({ cols, rows }) => sendWs({ type: 'resize', id: job.id, cols, rows }));
   } else {
     host.textContent = 'xterm.js failed to load';
   }
-  const pane = { kind: 'terminal', node, term, fit, title, stateEl, attached: false };
+  const pane = { kind: 'terminal', node, term, fit, title, stateEl, mic, attached: false };
   panes.set(job.id, pane);
   return pane;
 }
@@ -669,7 +855,7 @@ function enableClipboard(term, host) {
   });
 }
 
-function createChat(chat) {
+function createChat(chat, maximize) {
   const acc = account(chat.accountId);
   const color = safeColor(acc?.color);
   const l = acc ? look(acc) : null;
@@ -683,10 +869,12 @@ function createChat(chat) {
     rgb: hexRgb(color).join(','),
     placeholder: `Γράψε στο ${cli}…`,
     api,
+    voice,
+    maximize,
     onFocus: () => { if (S.focused !== chat.id) focusJob(chat.id); },
     onClose: () => closeSession(chat.id),
   });
-  const pane = { kind: 'chat', view, node: view.node, attached: false };
+  const pane = { kind: 'chat', view, node: view.node, mic: view.mic, attached: false };
   panes.set(chat.id, pane);
   return pane;
 }
@@ -701,7 +889,7 @@ function attachPane(id) {
 function fitAll() {
   if (!dockOpen()) return;
   for (const [id, pane] of panes) {
-    if (!pane.fit || !pane.node.isConnected) continue;
+    if (!pane.fit || !pane.node.isConnected || (maximizedId && id !== maximizedId)) continue;
     try { pane.fit.fit(); } catch { /* not laid out yet */ }
     if (pane.term) sendWs({ type: 'resize', id, cols: pane.term.cols, rows: pane.term.rows });
   }
@@ -727,7 +915,7 @@ function closeSession(id) {
   if (S.chats.some((c) => c.id === id)) { closeChat(id); return; }
   const job = S.jobs.find((j) => j.id === id);
   if (!job) return;
-  const live = job.state === 'working' || job.state === 'idle';
+  const live = job.exitCode === null;
   if (live && !confirm(`Τερματισμός του "${job.title}";`)) return;
   // The server drops the job (and frees its console) on kill, finished or not; the next jobs list removes the pane.
   sendWs({ type: 'kill', id });
@@ -735,6 +923,8 @@ function closeSession(id) {
 
 function renderJobs() {
   const jobs = visibleJobs();
+  if (maximizedId && !jobs.some((j) => j.id === maximizedId)) maximizedId = null;
+  $('dock').classList.toggle('has-maximized', maximizedId !== null);
   if (S.focused && !jobs.some((j) => j.id === S.focused)) S.focused = null;
   if (!S.focused && jobs.length) S.focused = jobs[jobs.length - 1].id;
 
@@ -755,14 +945,25 @@ function renderJobs() {
 
   // panes (kept alive across renders so xterm keeps its buffer)
   const drawer = $('drawer');
-  let added = false;
+  let layoutChanged = false;
   for (const job of jobs) {
     let pane = panes.get(job.id);
     if (!pane) {
-      pane = job.kind === 'chat' ? createChat(job.info) : createPane(job.info);
+      const maximize = el('button', { type: 'button', class: 'x', onclick: () => toggleMaximized(job.id) });
+      pane = job.kind === 'chat' ? createChat(job.info, maximize) : createPane(job.info, maximize);
+      pane.maximize = maximize;
+      const header = pane.node.querySelector('header');
+      header.addEventListener('mousedown', (e) => {
+        // Keep the header under the pointer instead of scrolling to the terminal or composer.
+        e.stopPropagation();
+        if (S.focused !== job.id) selectJob(job.id);
+      });
+      header.addEventListener('dblclick', (e) => {
+        if (!e.target.closest('button, input')) toggleMaximized(job.id);
+      });
       drawer.append(pane.node);
       attachPane(job.id);
-      added = true;
+      layoutChanged = true;
     }
     if (pane.kind === 'chat') {
       pane.view.setInfo(job.info);
@@ -772,27 +973,33 @@ function renderJobs() {
       pane.node.dataset.state = job.state;
     }
     pane.node.classList.toggle('focus', job.id === S.focused);
+    const maximized = job.id === maximizedId;
+    pane.node.classList.toggle('maximized', maximized);
+    pane.maximize.textContent = maximized ? '⤡' : '⤢';
+    pane.maximize.title = maximized ? 'Σμίκρυνση' : 'Μεγέθυνση';
+    pane.maximize.setAttribute('aria-label', pane.maximize.title);
   }
   for (const [id, pane] of panes) {
     if (!jobs.some((j) => j.id === id)) {
+      voice.detach(pane.mic);
       if (pane.kind === 'chat') pane.view.dispose(); else pane.term?.dispose();
       pane.node.remove();
       panes.delete(id);
+      layoutChanged = true;
     }
   }
   // keep the drawer in session order; only move nodes when needed (moving resets scroll positions)
   const order = jobs.map((j) => panes.get(j.id).node);
   if (order.some((n, i) => drawer.children[i] !== n)) for (const n of order) drawer.append(n);
   drawer.style.setProperty('--cols', String(Math.max(1, Math.min(3, jobs.length))));
-  if (added) requestAnimationFrame(fitAll);
+  if (layoutChanged) requestAnimationFrame(fitAll);
   renderStates();
 }
 
 function renderStates() {
   const job = visibleJobs().find((j) => j.id === S.focused);
   const state = job?.state ?? 'idle';
-  const lit = state === 'waiting' ? 'working' : state; // the core has no separate "waiting" light
-  for (const s of $('states').querySelectorAll('span')) s.classList.toggle('on', s.dataset.s === lit);
+  for (const s of $('states').querySelectorAll('span')) s.classList.toggle('on', s.dataset.s === state);
   $('st').textContent = STATE_LABEL[state] ?? state;
   $('ready').textContent = job ? `${job.title} · ${STATE_LABEL[state] ?? state}` : 'Ready · idle';
 }
@@ -863,6 +1070,13 @@ function onMessage(ev) {
   }
 }
 
+function reportFocus() {
+  sendWs({ type: 'focus', focused: !document.hidden && document.hasFocus() });
+}
+window.addEventListener('focus', reportFocus);
+window.addEventListener('blur', reportFocus);
+document.addEventListener('visibilitychange', reportFocus);
+
 function connect() {
   clearTimeout(reconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -871,6 +1085,7 @@ function connect() {
   sock.addEventListener('open', () => {
     backoff = 500;
     setDown(false);
+    reportFocus();
     for (const id of panes.keys()) attachPane(id); // live data only flows to attached sockets
     fitAll();
   });

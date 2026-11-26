@@ -34,6 +34,15 @@ The user is Stathis. They are not a developer. They write Greek or Greeklish.
 4. Tell the user how to see the change in Jarvis (see "Seeing changes" below).
 5. Commit and push only when the user asks (see "Git and GitHub").
 
+### Your team (when you are the leader)
+You have the `jarvis-helpers` tools: `ask_gemini` (research, second opinions, reading long
+files, writing text; cannot run commands) and `ask_claude` (careful reasoning, planning,
+review, writing), plus any other AI the user adds to Jarvis. Helpers do not see your
+conversation: give each a self-contained task (goal, exact files, what "done" means, checks to
+run) and pass your current folder as `cwd`. Independent parts can go to different helpers.
+Do small things yourself. Always verify a helper's work (diff, tests) before telling the user
+it is done, and say plainly if a helper failed.
+
 ### Seeing changes in Jarvis
 - Change only in `public/` (page, styles, buttons): the user presses **Ctrl + R** in Jarvis.
 - Change in `src/` (the server): the user presses **Restart** in Jarvis. Restart reopens their
@@ -72,8 +81,8 @@ The user is Stathis. They are not a developer. They write Greek or Greeklish.
 
 - Never read or print login files (`auth.json`, `.credentials.json`, `oauth_creds.json`).
 - Never add API keys.
-- Never use the work Codex account (`C:\Users\stath\.codex`). The personal one is
-  `C:\Users\stath\.codex-personal`.
+- The work Codex account (`C:\Users\stath\.codex`, "Codex Work") is for TestreaTech work
+  only (helper tool `ask_codex_work`). The personal one is `C:\Users\stath\.codex-personal`.
 - Never delete or overwrite something you do not understand. Ask first.
 
 ## Git and GitHub

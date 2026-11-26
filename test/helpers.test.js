@@ -7,12 +7,14 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.js';
-import { runHelper, helperLaunch, helperAccount } from '../src/helpers.js';
+import { runHelper, helperLaunch, helperAccount, isLimitFailure } from '../src/helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 function config() {
   const c = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
+  c.accounts.work.env.CODEX_HOME = path.join(os.tmpdir(), 'jarvis-test-work-login');
+  c.accounts.mine.env.CODEX_HOME = path.join(os.tmpdir(), 'jarvis-test-personal-login');
   c.accounts.gemini.enabled = true;
   c.accounts.gemini.cli = 'agy';
   c.projects = [{ name: 'job', path: path.join(os.tmpdir(), 'WorkProj'), side: 'work' }];
@@ -20,7 +22,7 @@ function config() {
 }
 
 // A fake CLI: records how it was started, writes `answer` to the -o file (codex) or stdout (agy).
-function fakeSpawn({ answer = 'done', code = 0, never = false } = {}) {
+function fakeSpawn({ answer = 'done', stderr = '', code = 0, never = false } = {}) {
   const calls = [];
   const spawn = (file, args, opts) => {
     const child = new EventEmitter();
@@ -36,6 +38,7 @@ function fakeSpawn({ answer = 'done', code = 0, never = false } = {}) {
         const o = args.indexOf('-o');
         if (o >= 0) fs.writeFileSync(args[o + 1], answer);
         else child.stdout.write(answer);
+        child.stderr.write(stderr);
         child.emit('close', code);
       }, 20);
     }
@@ -43,6 +46,26 @@ function fakeSpawn({ answer = 'done', code = 0, never = false } = {}) {
   };
   return { spawn, calls };
 }
+
+test('usage limit detection follows the provider and ignores successful answers', async () => {
+  for (const kind of ['codex', 'codex-work', 'gemini']) {
+    assert.equal(isLimitFailure(kind, 'Rate limit exceeded'), true);
+    assert.equal(isLimitFailure(kind, 'Quota exceeded'), true);
+    assert.equal(isLimitFailure(kind, 'permission denied'), false);
+    assert.equal(isLimitFailure(kind, 'HTTP 429'), kind === 'gemini');
+  }
+  const c = config();
+  for (const [kind, answer, stderr] of [
+    ['codex', 'partial answer', "ERROR: You've hit your usage limit."],
+    ['gemini', '', 'RESOURCE_EXHAUSTED'],
+  ]) {
+    const { spawn, calls } = fakeSpawn({ code: 1, answer, stderr });
+    await assert.rejects(runHelper({ config: c, kind, task: 'review', cwd: os.tmpdir(), spawn }), { message: stderr });
+    assert.equal(calls.length, 1);
+  }
+  const { spawn } = fakeSpawn({ answer: 'fixed quota handling' });
+  assert.equal((await runHelper({ config: c, kind: 'codex', task: 'review', cwd: os.tmpdir(), spawn })).answer, 'fixed quota handling');
+});
 
 test('codex helper: personal login, workspace sandbox, task on stdin, final answer returned', async () => {
   const c = config();
@@ -79,7 +102,7 @@ test('gemini helper runs agy -p with accept-edits in the folder', async () => {
   assert.ok(!calls[0].args.includes('--dangerously-skip-permissions'));
 });
 
-test('helpers refuse work folders, empty tasks and missing accounts', async () => {
+test('personal helpers refuse work folders, empty tasks and missing accounts', async () => {
   const c = config();
   const { spawn, calls } = fakeSpawn();
   await assert.rejects(runHelper({ config: c, kind: 'codex', task: 'x', cwd: path.join(os.tmpdir(), 'WorkProj', 'src'), spawn }), /δουλειάς/);
@@ -87,8 +110,30 @@ test('helpers refuse work folders, empty tasks and missing accounts', async () =
   c.accounts.gemini.enabled = false;
   await assert.rejects(runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn }), /Gemini/);
   assert.equal(calls.length, 0);
-  // the work Codex account is never used as a helper
   assert.equal(helperAccount(config(), 'codex').id, 'mine');
+});
+
+test('codex-work selects the first enabled work Codex account and reports when none exists', () => {
+  const c = config();
+  c.accounts.secondWork = { ...c.accounts.work, id: 'secondWork' };
+  assert.equal(helperAccount(c, 'codex-work'), c.accounts.work);
+  c.accounts.work.enabled = false;
+  assert.equal(helperAccount(c, 'codex-work'), c.accounts.secondWork);
+  c.accounts.secondWork.enabled = false;
+  assert.throws(() => helperAccount(c, 'codex-work'), {
+    message: 'Δεν υπάρχει ενεργός εταιρικός λογαριασμός Codex στο Jarvis',
+  });
+});
+
+test('codex-work runs with its work login in a work project and outside it', async () => {
+  const c = config();
+  const { spawn, calls } = fakeSpawn();
+  for (const cwd of [c.projects[0].path, os.tmpdir()]) {
+    const result = await runHelper({ config: c, kind: 'codex-work', task: 'review', cwd, spawn });
+    assert.equal(result.account, c.accounts.work.label);
+    assert.equal(calls.at(-1).opts.env.CODEX_HOME, c.accounts.work.env.CODEX_HOME);
+    assert.equal(calls.at(-1).opts.cwd, cwd);
+  }
 });
 
 test('a helper that hangs is stopped after the timeout; a failing one reports its error', async () => {
@@ -170,4 +215,14 @@ test('an empty gemini answer is retried once', async () => {
   const r = await runHelper({ config: c, kind: 'gemini', task: 'x', cwd: os.tmpdir(), spawn });
   assert.equal(r.answer, 'second time works');
   assert.equal(n, 2);
+});
+
+test('Claude helper uses stdin and headless text mode', async () => {
+  const c = config();
+  c.accounts.claude = { enabled: true, side: 'personal', cli: 'claude', label: 'Claude', env: {} };
+  const { spawn, calls } = fakeSpawn();
+  await runHelper({ config: c, kind: 'claude', task: 'review this', cwd: os.tmpdir(), spawn });
+  assert.deepEqual(calls[0].args.slice(-5), ['-p', '--permission-mode', 'acceptEdits', '--output-format', 'text']);
+  assert.match(calls[0].stdin, /team leader/);
+  assert.ok(calls[0].stdin.endsWith('review this'));
 });

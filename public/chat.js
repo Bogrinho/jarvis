@@ -1,6 +1,7 @@
 // Chat pane: the HUD conversation view (design/chat-mockup.html) for one Codex/Claude conversation.
 // All server/AI text reaches the DOM as text nodes (via h / renderMarkdown); never as HTML.
 import { renderMarkdown } from './markdown.js';
+import { appendSpeech } from './voice.js';
 
 // Tiny DOM builder shared with app.js. Strings become text nodes.
 export function h(tag, props = {}, ...children) {
@@ -62,7 +63,7 @@ function dayLabel(iso) {
 }
 
 /**
- * createChatPane({ info, who, cli, mode, color, rgb, placeholder, api, onFocus, onClose })
+ * createChatPane({ info, who, cli, mode, color, rgb, placeholder, api, maximize, onFocus, onClose })
  * -> { node, focus(), setInfo(info), snapshot(info, items), addItem(item), delta(itemId, text), patch(itemId, patch), dispose() }
  */
 const PERMISSION_TEXT = {
@@ -73,7 +74,7 @@ const PERMISSION_TEXT = {
 };
 export const permissionText = (cli, mode) => PERMISSION_TEXT[`${cli}:${mode}`] ?? 'ρωτάει πριν από αλλαγές και εντολές';
 
-export function createChatPane({ info: initial, who, cli, mode, color, rgb, placeholder, api, onFocus, onClose }) {
+export function createChatPane({ info: initial, who, cli, mode, color, rgb, placeholder, api, voice, maximize, onFocus, onClose }) {
   let info = { ...initial };
   const recs = new Map(); // itemId -> { item, node, answering }
   let tail = null; // { type:'me'|'ai'|'sys', body }
@@ -84,7 +85,8 @@ export function createChatPane({ info: initial, who, cli, mode, color, rgb, plac
 
   // ---------- skeleton ----------
   const title = h('h2');
-  const sub = h('small');
+  const path = h('span');
+  const sub = h('small', {}, h('span', { class: 'who', text: who }), path);
   const pill = h('span', { class: 'pill' });
   const close = h('button', { type: 'button', class: 'x', 'aria-label': 'Κλείσιμο συζήτησης', text: '✕' });
   const log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite' });
@@ -92,17 +94,23 @@ export function createChatPane({ info: initial, who, cli, mode, color, rgb, plac
   const typing = h('div', { class: 'ai typing-row' }, h('div', { class: 'av', 'aria-hidden': 'true' }),
     h('div', { class: 'typing' }, 'σκέφτεται ', h('span', { 'aria-hidden': 'true' }, h('i'), h('i'), h('i'))));
   const input = h('textarea', { rows: 1, placeholder: placeholder ?? 'Γράψε…', 'aria-label': 'Μήνυμα' });
+  const mic = voice?.button(text => {
+    input.value = appendSpeech(input.value, text);
+    grow();
+  });
   const send = h('button', { type: 'button', class: 'send', 'aria-label': 'Αποστολή', title: 'Αποστολή', text: '➤' });
   const stop = h('button', { type: 'button', class: 'stop', 'aria-label': 'Σταμάτα', title: 'Σταμάτα', hidden: true },
     h('span', { 'aria-hidden': 'true' }));
   const err = h('span', { class: 'err', role: 'status' });
   const node = h('section', { class: 'chat', style: { '--c': color, '--c-rgb': rgb } },
-    h('div', { class: 'hd' },
+    h('header', { class: 'hd' },
       h('div', { class: 'orb', 'aria-hidden': 'true' }),
       h('div', { class: 'ttl' }, title, sub),
       h('div', { class: 'sp' }),
       h('span', { class: 'seg', title: 'Λειτουργία' }, h('span', { class: 'on', text: 'Chat' })),
       pill,
+      mic,
+      maximize,
       close),
     h('div', { class: 'beam', 'aria-hidden': 'true' }),
     h('div', { class: 'logwrap' }, log, newer),
@@ -286,7 +294,7 @@ export function createChatPane({ info: initial, who, cli, mode, color, rgb, plac
   function setInfo(next) {
     info = { ...info, ...next };
     title.textContent = info.title ?? '';
-    sub.textContent = `${who} · ${shortPath(info.cwd)}`;
+    path.textContent = ` · ${shortPath(info.cwd)}`;
     sub.title = info.cwd ?? '';
     pill.textContent = PILL[info.state] ?? String(info.state ?? '');
     node.dataset.state = info.state ?? 'idle';
@@ -345,6 +353,7 @@ export function createChatPane({ info: initial, who, cli, mode, color, rgb, plac
 
   return {
     node,
+    mic,
     focus() { if (!input.disabled) input.focus({ preventScroll: true }); },
     setInfo,
     snapshot(nextInfo, items) {

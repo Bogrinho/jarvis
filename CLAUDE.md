@@ -36,5 +36,7 @@ the three, so keep your own work light and hand the heavy lifting to the helpers
   sometimes fails when the PC is busy; run it again on its own before treating it as a bug.
 - Config: `jarvis.config.json` (accounts, homes, modes). Tests use `test/fixtures/jarvis.config.json`.
 - Never read or print login files (`auth.json`, `.credentials.json`, `oauth_creds.json`).
-  Never add API keys. Never use the work Codex account (`C:\Users\stath\.codex`).
+  Never add API keys. The work Codex account (`C:\Users\stath\.codex`, "Codex Work") is
+  mainly for TestreaTech work, via `ask_codex_work`; use the personal one (`ask_codex`) for everything else.
+  When a helper hits its usage limit, the user wants this fallback order: Codex personal → Codex work → Gemini.
 - Commit only when the user asks.

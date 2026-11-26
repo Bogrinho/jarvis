@@ -1,6 +1,15 @@
 {
   "port": 4777,
   "accounts": {
+    "work": {
+      "label": "Codex Work",
+      "cli": "codex",
+      "side": "work",
+      "mode": "auto",
+      "home": "C:\\Users\\stath\\Documents\\Codex\\2026-05-17\\act-as-my-coding-agent-we",
+      "env": { "CODEX_HOME": "C:\\Users\\stath\\.codex" },
+      "enabled": true
+    },
     "mine": {
       "label": "Codex Personal",
       "cli": "codex",
@@ -30,6 +39,7 @@
     }
   },
   "projects": [
+    {"name": "IFWDB", "path": "C:\\Users\\stath\\Documents\\Codex\\2026-10-26\\alakse-sto-biographiko-mou-sto-github\\IFWDB", "side": "personal"},
     { "name": "TikTok Sale", "path": "C:\\Users\\stath\\Documents\\TikTok Sale", "side": "personal" },
     { "name": "Internships", "path": "C:\\Users\\stath\\Documents\\Internships", "side": "personal" },
     { "name": "Portfolio", "path": "C:\\Users\\stath\\Documents\\Portfolio", "side": "personal" },

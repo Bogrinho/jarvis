@@ -9,10 +9,12 @@ import { loadConfig, ConfigError } from '../src/config.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fx = (name) => path.join(here, 'fixtures', 'config', name);
 
-test('loads default config (work Codex removed)', () => {
+test('loads default config with separate work and personal Codex accounts', () => {
   const c = loadConfig('jarvis.config.json');
-  assert.deepEqual(Object.keys(c.accounts), ['mine', 'claude', 'gemini']);
-  assert.equal(c.accounts.work, undefined);
+  assert.deepEqual(Object.keys(c.accounts), ['work', 'mine', 'claude', 'gemini']);
+  assert.equal(c.accounts.work.enabled, true);
+  assert.equal(c.accounts.work.cli, 'codex');
+  assert.equal(c.accounts.work.side, 'work');
   assert.equal(c.accounts.mine.env.CODEX_HOME, 'C:\\Users\\stath\\.codex-personal');
   assert.equal(c.accounts.claude.mode, 'auto');
   assert.equal(c.accounts.gemini.enabled, true);
@@ -23,7 +25,7 @@ test('fixture config keeps the work account for side-rule tests', () => {
   const c = loadConfig(path.join(here, 'fixtures', 'jarvis.config.json'));
   assert.equal(c.accounts.work.env.CODEX_HOME, 'C:\\Users\\stath\\.codex');
   assert.equal(c.accounts.work.mode, 'cautious');
-  assert.equal(c.accounts.work.color, '#5b8cff');
+  assert.equal(c.accounts.work.color, '#ffb547');
 });
 
 test('resolves relative paths against rootDir, keeping Greek characters', () => {

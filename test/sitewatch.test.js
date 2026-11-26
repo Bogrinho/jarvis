@@ -43,16 +43,27 @@ test('sends the key as a Bearer token to /api/status and keeps only the known fi
   assert.equal(JSON.stringify(r).includes('abc123'), false, 'the key is never in the result');
 });
 
-test('wrong key, endpoint off, server error and network failure are reported plainly', async () => {
-  const f = tokenFile('k'.repeat(40));
+test('reports safe reasons for HTTP, network, timeout and invalid response errors', async () => {
+  const key = 'k'.repeat(40);
+  const f = tokenFile(key);
   assert.equal((await readSiteWatch({ url: URL_, tokenFile: f, fetch: reply(401, {}) })).state, 'bad-token');
   assert.equal((await readSiteWatch({ url: URL_, tokenFile: f, fetch: reply(404, {}) })).state, 'disabled');
-  assert.equal((await readSiteWatch({ url: URL_, tokenFile: f, fetch: reply(503, {}) })).state, 'error');
-  assert.equal((await readSiteWatch({ url: URL_, tokenFile: f, fetch: async () => { throw new Error('offline'); } })).state, 'error');
-  assert.equal((await readSiteWatch({ url: URL_, tokenFile: f, fetch: reply(200, { monitors: 'nope' }) })).state, 'error');
+  const failures = [
+    [reply(503, {}), 'http 503'],
+    [async () => { throw new Error(key); }, 'network'],
+    [async () => { throw new DOMException(key, 'TimeoutError'); }, 'timeout'],
+    [async () => new Response(key), 'bad json'],
+    [reply(200, { monitors: 'nope' }), 'missing monitors'],
+  ];
+  for (const [fetch, reason] of failures) {
+    assert.deepEqual(await readSiteWatch({ url: URL_, tokenFile: f, fetch }), { state: 'error', reason });
+  }
 });
 
 test('only https addresses are used', async () => {
-  const r = await readSiteWatch({ url: 'http://insecure.example', tokenFile: tokenFile('k'.repeat(40)), fetch: reply(200, { monitors: [] }) });
-  assert.equal(r.state, 'error');
+  const f = tokenFile('k'.repeat(40));
+  for (const url of ['http://insecure.example', 'invalid address']) {
+    const r = await readSiteWatch({ url, tokenFile: f, fetch: reply(200, { monitors: [] }) });
+    assert.deepEqual(r, { state: 'error', reason: 'bad url' });
+  }
 });

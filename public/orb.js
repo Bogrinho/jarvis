@@ -81,7 +81,7 @@ function neighbours(points) {
   });
 }
 
-export function createOrb(canvas, { shape: initialShape = 'claude', rgb = [224, 96, 154], pauseButton } = {}) {
+export function createOrb(canvas, { shape: initialShape = 'claude', rgb = [177, 140, 255], pauseButton } = {}) {
   const cx = canvas.getContext('2d');
   const W = canvas.width;
   const R = W * 0.43;
@@ -131,7 +131,7 @@ export function createOrb(canvas, { shape: initialShape = 'claude', rgb = [224, 
     }
     const [r, g, b] = cur;
     cx.clearRect(0, 0, W, W);
-    cx.globalCompositeOperation = 'lighter';
+    cx.globalCompositeOperation = 'source-over';
     const breathe = 1 + 0.015 * Math.sin(ang * 12);
     const Q = pos.map((p) => [W / 2 + p[0] * R * breathe, W / 2 + p[1] * R * breathe, p[2]]);
     if (lines > 0.02) {
@@ -151,8 +151,8 @@ export function createOrb(canvas, { shape: initialShape = 'claude', rgb = [224, 
     }
     for (const a of Q) {
       const d = Math.max(0, Math.min(1, (a[2] + 1) / 2));
-      const w = white * (0.5 + 0.5 * d);
-      cx.fillStyle = `rgba(${(r + (255 - r) * w) | 0},${(g + (255 - g) * w) | 0},${(b + (255 - b) * w) | 0},${0.3 + 0.7 * d})`;
+      const w = white * (0.7 + 0.5 * d);
+      cx.fillStyle = `rgba(${(r + (255 - r) * w) | 0},${(g + (255 - g) * w) | 0},${(b + (255 - b) * w) | 0},${0.28 + 0.5 * d})`;
       cx.beginPath();
       cx.arc(a[0], a[1], 0.7 + 2.2 * d, 0, 7);
       cx.fill();

@@ -12,7 +12,10 @@ import { refreshWindowsPath } from '../src/winpath.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 refreshWindowsPath();
 const config = loadConfig(path.join(ROOT, 'jarvis.config.json'));
-const handle = createMcpHandler({ config, cwd: process.cwd(), run: runHelper });
+const leaderIndex = process.argv.indexOf('--leader');
+const leader = leaderIndex < 0 ? 'claude' : process.argv[leaderIndex + 1];
+if (!['claude', 'codex', 'agy'].includes(leader)) throw new Error('Invalid --leader');
+const handle = createMcpHandler({ config, cwd: process.cwd(), run: runHelper, leader });
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on('line', async (line) => {
