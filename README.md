@@ -1,86 +1,64 @@
+English | [Ελληνικά](README.el.md)
+
 # Jarvis
 
-Το Jarvis είναι ένας πίνακας ελέγχου (HUD) που τρέχει στον υπολογιστή σας και σας επιτρέπει να δίνετε δουλειές στα εργαλεία **Codex**, **Claude** και **Gemini** από ένα μέρος. Δείχνει ποια δουλειά τρέχει, πόση χρήση έχετε κάνει σε κάθε λογαριασμό, και χωρίζει τα έργα σε **Work** και **Personal** ώστε να μην μπερδεύονται οι λογαριασμοί.
+A local dashboard where one AI agent (Claude) acts as team leader and delegates coding and research work to other AI agents (Codex, Gemini) through an MCP server, with automatic fallback when an account hits its usage limit.
 
-Τρέχει μόνο στον δικό σας υπολογιστή (διεύθυνση `127.0.0.1`, πόρτα `4777`). Δεν είναι προσβάσιμο από το internet.
+## Why I built it
 
-## Εγκατάσταση σε 4 βήματα
+I juggle multiple AI subscriptions across different providers, each with distinct rate limits, pricing models, and specialized strengths. Switching between separate browser tabs and standalone terminals was slow and fragmented, so I wanted a centralized workspace to run them side by side. Jarvis coordinates them as an automated team, letting a primary reasoning agent orchestrate workflows and offload implementation tasks to secondary models.
 
-Χρειάζεστε το **Node.js 20 ή νεότερο** (https://nodejs.org, έκδοση LTS).
+## Features
 
-**Βήμα 1.** Ανοίξτε το PowerShell (Έναρξη, πληκτρολογήστε `PowerShell`) και πηγαίνετε στον φάκελο του Jarvis:
+- **Terminal sessions in the browser**: Interactive PTY terminal sessions powered by xterm.js and node-pty over WebSockets, letting you interact directly with CLI agents.
+- **Multi-agent delegation via MCP**: Exposes a local Model Context Protocol (MCP) server (`jarvis-helpers`) so the lead agent can invoke helper agents (`ask_codex`, `ask_codex_work`, `ask_gemini`) for code review, edits, and research.
+- **Automatic quota fallback**: If a helper hits its rate or usage limit, tasks cascade automatically through a defined fallback order (Codex Personal -> Codex Work -> Gemini).
+- **Work and Personal account separation**: Strict policy isolation preventing personal AI helpers from accessing work-designated project directories and vice versa.
+- **Live usage tracking**: Monitors 5-hour and weekly quota usage percentages, token counters, and reset windows parsed directly from CLI session logs.
+- **Visual agent states**: Real-time canvas orb and state indicators reflecting whether each agent is idle, working, waiting for user input, or in an error state.
+- **In-browser voice dictation**: Web Speech API integration to dictate prompts and commands directly into active terminal sessions.
+- **Phone access through Tailscale Serve**: Secure remote access from a mobile device over an encrypted Tailnet with host verification and user identity headers.
+- **Restart with session restore**: In-app restart functionality that captures active terminal sessions and restores them automatically upon server reboot.
 
-```powershell
-cd "C:\Users\stath\OneDrive\Έγγραφα\Jarvis"
+## How it works
+
+Jarvis runs a local Node.js server (`src/main.js`) on `127.0.0.1:4777`. The browser frontend connects via WebSockets to manage pseudo-terminal processes (`node-pty`) attached to `xterm.js` clients. Configuration for accounts, projects, and permissions is defined in `jarvis.config.json`. The lead agent communicates with helpers through a stdio JSON-RPC MCP server (`scripts/helpers-mcp.js`).
+
+```mermaid
+flowchart TD
+    User["Browser Dashboard (xterm.js HUD)"] <-->|HTTP / WebSocket| Server["Node.js Server (127.0.0.1:4777)"]
+    Server <-->|node-pty| Leader["Claude CLI (Team Leader)"]
+    Leader <-->|stdio MCP| MCP["MCP Server (jarvis-helpers)"]
+    MCP -->|delegates task| Codex["Codex CLI (Personal / Work)"]
+    MCP -->|delegates task| Gemini["Gemini CLI (Antigravity)"]
+    Codex -.->|fallback on limit| Gemini
 ```
 
-**Βήμα 2.** Τρέξτε το script εγκατάστασης:
+## Tech stack
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
-```
+Node.js (ES modules), WebSocket (ws), node-pty, xterm.js, Model Context Protocol (MCP), Vanilla JS / CSS, PowerShell.
 
-Εγκαθιστά ό,τι λείπει, φτιάχνει τη συντόμευση «Jarvis» στην Επιφάνεια εργασίας και σας ρωτά αν θέλετε να μετράει το Claude το ποσοστό χρήσης (απαντήστε `Y` για ναι). Μπορείτε να το τρέξετε ξανά όποτε θέλετε χωρίς πρόβλημα.
+## Testing
 
-**Βήμα 3.** Συνδεθείτε μία φορά σε κάθε λογαριασμό (το script τυπώνει τις ίδιες εντολές στο τέλος):
+Run tests with `npm test` (or `npm.cmd test` on Windows). The suite contains 260+ tests using Node's built-in test runner (`node --test`), covering policy enforcement, MCP handlers, terminal multiplexing, usage parsers, and server endpoints.
 
-- Codex Personal (λογαριασμός Plus):
-  ```powershell
-  $env:CODEX_HOME="$HOME\.codex-personal"; codex login
-  ```
-- Codex Work: αν δεν είναι ήδη συνδεδεμένο, `codex login`
-- Claude: γράψτε `claude` και μετά `/login`
-- Gemini (προαιρετικό): γράψτε `gemini` και επιλέξτε σύνδεση με Google
+## Getting started
 
-**Βήμα 4.** Κάντε διπλό κλικ στη συντόμευση **Jarvis** στην Επιφάνεια εργασίας. Το Jarvis ανοίγει σε δικό του παράθυρο. Αν το ανοίξετε ξανά ενώ τρέχει ήδη, απλώς ανοίγει νέο παράθυρο (δεν ξεκινά δεύτερο Jarvis).
+Windows only. Requires Node.js 20+ (LTS).
 
-## Συντομεύσεις και αυτόματη εκκίνηση
+1. Run the setup script in PowerShell to install dependencies and create desktop shortcuts:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+   ```
+2. Log in once to each CLI provider:
+   - Codex Personal: `$env:CODEX_HOME="$HOME\.codex-personal"; codex login`
+   - Codex Work: `codex login`
+   - Claude: `claude` (then run `/login`)
+   - Gemini: `gemini` (or `agy`)
+3. Launch Jarvis by double-clicking the **Jarvis** desktop shortcut or running `npm start`.
 
-Κάντε δεξί κλικ στο `scripts\install-shortcuts.ps1` και επιλέξτε **Run with PowerShell**, ή εκτελέστε από τον φάκελο Jarvis:
+## Security notes
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-shortcuts.ps1
-```
-
-Το script δημιουργεί συντομεύσεις στην Επιφάνεια εργασίας και στο μενού Έναρξη και ρωτά αν θέλετε αυτόματη εκκίνηση. Για παράλειψη της ερώτησης προσθέστε `-AutoStart` ή `-NoAutoStart`.
-
-## Πώς προσθέτω έργα
-
-Ανοίξτε το αρχείο `jarvis.config.json` (με το Σημειωματάριο) και βάλτε τα έργα σας στη λίστα `projects`. Κάθε έργο έχει `name` (όνομα), `path` (φάκελος) και `side` (`work` ή `personal`).
-
-**Προσοχή:** στα Windows paths μέσα στο JSON κάθε `\` γράφεται ως `\\` (δύο φορές).
-
-```json
-"projects": [
-  {
-    "name": "Εταιρικό site",
-    "path": "C:\\Users\\stath\\Projects\\company-site",
-    "side": "work"
-  },
-  {
-    "name": "Προσωπικό blog",
-    "path": "C:\\Users\\stath\\Projects\\my-blog",
-    "side": "personal"
-  }
-]
-```
-
-Κρατήστε κόμμα ανάμεσα στα έργα (όχι μετά το τελευταίο). Μετά από αλλαγή, κλείστε το Jarvis και ανοίξτε το ξανά.
-
-## Πώς μετριέται η χρήση ανά λογαριασμό
-
-- **Codex** (Work και Personal): ποσοστό % για τις τελευταίες 5 ώρες και για την εβδομάδα, από τα αρχεία καταγραφής (logs) του ίδιου του Codex.
-- **Claude**: ποσοστό % αν έχετε ενεργοποιήσει τον βοηθό status line (η ερώτηση στο Βήμα 2). Αλλιώς δείχνει tokens.
-- **Gemini**: στην έκδοση 1 δεν υπάρχουν δεδομένα χρήσης.
-
-## Πώς κλείνω το Jarvis
-
-Πατήστε το κουμπί τερματισμού μέσα στο HUD. Κλείνει ο server και τερματίζονται οι δουλειές που τρέχουν. Το κλείσιμο της καρτέλας του browser **δεν** κλείνει το Jarvis.
-
-## Αν κάτι δεν δουλεύει
-
-- **Το OneDrive «κολλάει» στο `npm install` ή ο φάκελος `node_modules` συγχρονίζεται:** παύστε προσωρινά τον συγχρονισμό OneDrive (εικονίδιο συννεφάκι, Παύση συγχρονισμού) και τρέξτε ξανά το script, ή μετακινήστε ολόκληρο τον φάκελο Jarvis εκτός OneDrive (π.χ. `C:\Jarvis`) και ξανατρέξτε το `scripts\setup.ps1` για να φτιαχτεί νέα συντόμευση.
-- **Η πόρτα 4777 είναι κατειλημμένη:** κάποιο άλλο πρόγραμμα την χρησιμοποιεί. Κλείστε το, ή αλλάξτε το `port` στο `jarvis.config.json` (π.χ. 4778) και ξανανοίξτε το Jarvis.
-- **«Δεν υπάρχουν δεδομένα» στο Codex Personal:** φυσιολογικό μέχρι να το χρησιμοποιήσετε για πρώτη φορά. Μετά την πρώτη δουλειά εμφανίζεται το ποσοστό.
-- **Το Codex Work ζητά έγκριση:** είναι σε «προσεκτική» λειτουργία (cautious). Ρωτά πριν γράψει αρχεία ή τρέξει εντολές, και πρέπει να εγκρίνετε από το HUD.
-- **Δεν ανοίγει τίποτα με το διπλό κλικ:** δείτε το αρχείο `data\server.log` για το σφάλμα, ή τρέξτε `npm start` στο PowerShell μέσα στον φάκελο για να δείτε μηνύματα.
+- Runs only on localhost (`127.0.0.1`) by default; never exposed directly to the public internet.
+- Never stores API keys or raw credentials; all operations use the native session logins of the installed CLIs.
+- Policy engine strictly blocks personal helpers from executing inside work project paths.
