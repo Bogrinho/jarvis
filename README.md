@@ -2,6 +2,8 @@ English | [Ελληνικά](README.el.md)
 
 # Jarvis
 
+![Jarvis dashboard](docs/screenshot.png)
+
 A local dashboard where one AI agent (Claude) acts as team leader and delegates coding and research work to other AI agents (Codex, Gemini) through an MCP server, with automatic fallback when an account hits its usage limit.
 
 ## Why I built it
